@@ -1,0 +1,9 @@
+{% extends "layout.html" %}
+
+
+{% block content %}
+<a href="{{ collection.url }}">Back to Blog</a>
+
+{{ content | markdown }}
+
+{% endblock content %}

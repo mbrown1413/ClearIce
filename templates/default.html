@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+
+{% block content %}
+{{ content | markdown }}
+
+<h2>Collections:</h2>
+{% for collection in collections %}
+    <a href="{{ collection.url }}">{{ collection.name }}</a>
+    <ul>
+        {% for item in collection %}
+            <li><a href="{{ item.url }}">{{ item.title }}</a></li>
+        {% endfor %}
+    </ul>
+{% endfor %}
+
+{% endblock content %}

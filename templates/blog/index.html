@@ -1,0 +1,20 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<a href="/">Back to Home</a><br>
+
+{% if content %}
+    {{ content | markdown }}
+{% endif %}
+
+{{ collection }}<br>
+
+Blog Posts:
+
+<ul>
+{% for post in collection.items %}
+    <li><a href="{{ post.url }}">{{ post.title }}</li>
+{% endfor %}
+</ul>
+
+{% endblock content %}

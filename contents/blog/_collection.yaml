@@ -1,0 +1,9 @@
+name: blog
+title: blog title!
+context:
+    template: blog/post.html
+pages:
+
+    - name: index
+      template: blog/index.html
+      blah: thas
