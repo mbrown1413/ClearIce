@@ -6,4 +6,3 @@ pages:
 
     - name: index
       template: blog/index.html
-      blah: thas

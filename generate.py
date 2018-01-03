@@ -13,36 +13,16 @@ import yaml
 from markdown import Markdown
 
 CONTENTS_DIR = "contents/"
-IGNORED_FILES = [".*", "*~"]
-MARKDOWN_FILES = ["*.md"]
-STATIC_FILES = ["*.jpg", "*.png"]
-
 DEFAULT_TEMPLATE = "default.html"
+
+IGNORED_FILES = [".*", "*~"]
+MARKDOWN_EXTENSIONS = [".md", ".markdown"]
+MARKDOWN_FILES = list("*"+ext for ext in MARKDOWN_EXTENSIONS)
 
 
 ########## Filename and URL Helpers ##########
 
-def matches_ignored(filename):
-    for ignored_pattern in IGNORED_FILES:
-        if fnmatch(filename, ignored_pattern):
-            return True
-    return False
-
-def matches(filename, ignored_patterns, matched_patterns):
-    if matches_ignored(filename):
-        return False
-    for pattern in MARKDOWN_FILES:
-        if fnmatch(filename, pattern):
-            return True
-    return False
-
-def matches_markdown(filename):
-    return matches(filename, IGNORED_FILES, MARKDOWN_FILES)
-
-def matches_static(filename):
-    return matches(filename, IGNORED_FILES, STATIC_FILES)
-
-def remove_extenison(filename, divider='.'):
+def remove_extension(filename, divider='.'):
     return filename[:filename.rfind(divider)]
 
 def remove_suffix(s, suffix):
@@ -77,17 +57,43 @@ def contents_path_to_url(path):
     if not url.endswith("/"):
         url = url + '/'
 
-    assert url.startswith('/')
-    assert url.endswith('/')
+    assert url.startswith('/') and url.endswith('/')
     return url
 
-def walk_dir(dirname, to_exclude=()):
-    dirname = os.path.abspath(dirname)
-    for dirpath, dirnames, filenames in os.walk(dirname):
+def fnmatch_one_of(filename, patterns):
+    for pattern in patterns:
+        if fnmatch(filename, pattern):
+            return True
+    return False
+
+def walk_dir(root, exclude=(), subdir="", fname_patterns=None):
+    """Recursively lists all files the root directory.
+
+    Args:
+        root: The directory to walk.
+        exclude: Ignore files with an absolute path in this collection.
+        subdir: If not `None`, only return files the directory "root/subdir/".
+        fname_patterns: A list of glob-style filename strings. If given, only
+            filenames that match one of these patterns will be returned.
+
+    Returns: [(abspath, relpath, filename), ...]
+        abspath: Absolute path of file, via `os.path.abspath()`.
+        relpath: Relative path of file from the root.
+        filename: Name of the file.
+    """
+    root = os.path.abspath(root)
+    assert subdir is None or not subdir.startswith('/')
+    for dirpath, dirnames, filenames in os.walk(os.path.join(root, subdir)):
         for filename in filenames:
+
+            if fnmatch_one_of(filename, IGNORED_FILES):
+                continue
+            if fname_patterns and not fnmatch_one_of(filename, fname_patterns):
+                continue
+
             abspath = os.path.join(dirpath, filename)
-            relpath = remove_prefix(abspath, dirname)
-            if abspath in to_exclude:
+            relpath = remove_prefix(abspath, root)
+            if abspath in exclude:
                 continue
             yield abspath, relpath, filename
 
@@ -99,9 +105,14 @@ def read_frontmatter_file(filename):
     lines = list(open(filename))
 
     # Find frontmatter markers
-    MARKER = "---\n"
-    fm_start = lines.index(MARKER)
-    fm_end = lines.index(MARKER, fm_start+1)
+    marker = "---\n"
+    try:
+        fm_start = lines.index(marker)
+        fm_end = lines.index(marker, fm_start+1)
+    except ValueError:
+        sys.stderr.write('Error while processing template "{}":\n'.format(filename))
+        sys.stderr.write('Template must have opening and closing "---" frontmatter delimiters.\n')
+        sys.exit(-1)
 
     if fm_start != 0:
         raise ValueError()  #TODO
@@ -120,19 +131,18 @@ def read_frontmatter_file(filename):
     content = ''.join(lines[fm_end+1:])
     return fm, content
 
-class TemplateView():
+class View():
 
-    def __init__(self, url, collections, template=None, collection=None):
+    def __call__(self):
+        raise NotImplementedError()
+
+class TemplateView(View):
+
+    def __init__(self, app, url, template=None, collection=None):
+        self.app = app
         self.url = url
-        self.collections = collections
         self.template = template
-
-        if collection:
-            self.collection = collection
-        else:
-            self.collection = collections.get_collection_by_url(self.url)
-            if self.collection:
-                self.collection.add(self)
+        self.collection = collection
 
         self.context = self.get_context()
 
@@ -144,7 +154,7 @@ class TemplateView():
 
         context = {
             "url": self.url,
-            "collections": self.collections,
+            "collections": self.app.collections,
             "collection": self.collection,
             "template": DEFAULT_TEMPLATE,
         }
@@ -160,12 +170,9 @@ class TemplateView():
 
         return context
 
-    def get_template(self):
-        #TODO: Error if template not specified
-        return self.context["template"]
-
     def __call__(self):
-        template = self.get_template()
+        #TODO: Error if template not specified
+        template = self.context["template"]
         try:
             return render_template(template, **self.context)
         except TemplateNotFound as e:
@@ -187,10 +194,10 @@ class TemplateView():
 
 class MarkdownView(TemplateView):
 
-    def __init__(self, url, collections, md_file, **kwargs):
+    def __init__(self, app, url, md_file, template=None, collection=None):
         self.md_file = md_file
         self.frontmatter, self.content = read_frontmatter_file(self.md_file)
-        super().__init__(url, collections, **kwargs)
+        super().__init__(app, url, template, collection)
 
     def get_context(self):
         context = super().get_context()
@@ -206,43 +213,92 @@ class MarkdownView(TemplateView):
         return context
 
 
-########## Collections ##########
+########## Generators ##########
 
-class Collection():
+class GeneratorBase():
+    """Base class for content generators.
 
-    def __init__(self, yaml_filename, url=None):
+    Generators can be any callable that receives the app and modifies it. The
+    main things that generators do are:
 
-        # Read yaml data
-        data = yaml.load(open(yaml_filename))
-        if not isinstance(data, dict):
-            raise ValueError('Expected dict describing collection, got "{}"'
-                    '(in file "{}")'.format(type(data), yaml_filename))
-        self.name = data.pop("name", None)
-        self.title = data.pop("title", None)
-        self.pages = data.pop("pages", [])
-        self.context = data.pop("context", {})
+      - Add urls using `app.add_url_rule()`.
+      - Consume files by calling `app.consume()`.
 
-        assert url and url.endswith('/') and url.startswith('/')
+    A simple generator might walk the contents directory, `app.contents_dir`,
+    add a url for every markdown file. Any files it comes across that are
+    consumsed already are usually ignored. If the generator doesn't want other
+    generators to use a file later, it consumes it.
+    """
+
+    # If instances should be part of the collections list `app.collections`.
+    is_collection = False
+
+    def __call__(self, app):
+        """
+        Produces content using `app.add_url_rule()` and consumes files in the
+        contents directory using `app.consume()`.
+        """
+        raise NotImplementedError()
+
+class MarkdownGenerator(GeneratorBase):
+    """Adds a `MarkdownView` url for every markdown file."""
+
+    def __call__(self, app):
+        files = walk_dir(app.contents_dir,
+                         exclude=app.consumed_files,
+                         fname_patterns=MARKDOWN_FILES)
+        for abspath, relpath, filename in files:
+            url = contents_path_to_url(remove_extension(relpath))
+            view = MarkdownView(app, url, abspath)
+            app.add_url_rule(url, url, view)
+            app.consume(abspath)
+
+class Collection(GeneratorBase):
+    #TODO: Describe collections and yaml data.
+
+    is_collection = True
+
+    def __init__(self, url, yaml_path):
+        """
+        `url`: Determines the base url that pages will be located, as well as
+            the base path in the contents directory to look for pages and items.
+        `yaml_path`: Absolute path of yaml file that describes the collection.
+        """
         self.url = url
-
+        self.yaml_path = yaml_path
         self.items = []
-
-        # Error on unexpected data
-        if data:
-            #TODO: Better error message
-            raise ValueError('Unexpected fields {} in collection'
-                    '(in file "{}")'.format(list(data.keys()), yaml_filename))
-
-    def __repr__(self):
-        return '<Collection url="{}">'.format(self.url)
 
     def __iter__(self):
         return self.items.__iter__()
 
-    def add(self, item):
-        self.items.append(item)
+    def __call__(self, app):
+        self.app = app
+        self.data = self.read_yaml_data()
+        self.app.consume(self.yaml_path)
 
-    def url_matches(self, url):
+        # Register static pages
+        for page in self.pages:
+            self.register_page(page)
+
+        # Find and collect items
+        files = walk_dir(app.contents_dir,
+                         exclude=app.consumed_files,
+                         subdir=remove_prefix(self.url, '/'),
+                         fname_patterns=MARKDOWN_FILES)
+        for abspath, relpath, filename in files:
+            url = contents_path_to_url(remove_extension(relpath))
+            if self.url_is_item(url):
+                view = MarkdownView(app, url, abspath, collection=self)
+                self.items.append(view)
+                app.consume(abspath)
+                app.add_url_rule(url, url, view)
+
+    def url_is_item(self, url):
+        # If `self.url` is in "/blog/", then "/blog/foo.md" and
+        # "/blog/bar/index.md" will be considered items.
+
+        # Remove last part of the given url separated by slashes. If it
+        # matches the collection's url, it's an item.
         if url.endswith('/'):
             url = url[:-1]
         try:
@@ -251,114 +307,100 @@ class Collection():
             return False
         return self.url == url[:last_slash+1]
 
-    def register_pages(self, app):
-        files_used = []
-        for page in self.pages:
-            page_files_used = self.register_page(page, app)
-            if page_files_used:
-                files_used.extend(page_files_used)
-        return files_used
+    def read_yaml_data(self):
+        data = yaml.load(open(self.yaml_path))
+        if not isinstance(data, dict):
+            raise ValueError('Expected dict describing collection, got "{}"'
+                    '(in file "{}")'.format(type(data), self.yaml_path))
 
-    def register_page(self, page_dict, app):
-        #TODO: Error if "name" not provided
-        url = self.url + page_dict["name"]
-        if page_dict["name"].endswith("index"):
+        self.name = data.pop("name", None)
+        self.title = data.pop("title", None)
+        self.pages = data.pop("pages", [])
+        self.context = data.pop("context", {})
+
+        # Error on unexpected data
+        if data:
+            #TODO: Better error message
+            raise ValueError('Unexpected fields {} in collection'
+                    '(in file "{}")'.format(list(data.keys()), self.yaml_path))
+
+    def register_page(self, page):
+        name = page.pop("name")  #TODO: Graceful error when field not found.
+        template = page.pop("template", None)
+        #TODO: Context attribute in yaml
+
+        # Unrecognized field error
+        if page:
+            #TODO: Better error message
+            raise ValueError('Unexpected fields {} in page of collection'
+                    '(in file "{}")'.format(list(page.keys()), self.yaml_path))
+
+        url = self.url + name
+        if name.endswith("index"):
             url = remove_suffix(url, "index")
         else:
             url += "/"
 
-        #TODO: Unrecognized fields in yaml file should cause error.
-        #TODO: Context attribute in yaml
-
-        #TODO: Error if "template" not provided
+        #TODO: Use `MARKDOWN_EXTENSIONS` to consider both .md and .markdown
         md_path = os.path.join(
             os.path.abspath(CONTENTS_DIR),
-            self.url[1:] + page_dict["name"] + ".md"
+            self.url[1:] + name + ".md"
         )
-        file_used = None
+        #TODO: Error if "template" not provided
         if os.path.exists(md_path):
-            file_used = md_path
-            view = MarkdownView(url, md_file=md_path,
-                                        collections=app.collections,
-                                        collection=self,
-                                        template=page_dict["template"])
+            view = MarkdownView(self.app, url, md_path, template, self)
+            self.app.consume(md_path)
         else:
-            view = TemplateView(url, collections=app.collections,
-                                        collection=self,
-                                        template=page_dict["template"])
-        app.add_url_rule(url, url, view)
-        return [file_used]
-
-class ColllectionSet():
-    #TODO: Enforce unique collection names
-
-    def __init__(self, collections=()):
-        self.collections = list(collections)
-
-    def __iter__(self):
-        return self.collections.__iter__()
-
-    def __getitem__(self, collection_name):
-        for collection in self:
-            if collection.name == collection_name:
-                return collection
-        return None
-
-    def __repr__(self):
-        return list(self).__repr__()
-
-    def add(self, collection):
-        self.collections.append(collection)
-
-    def get_collection_by_url(self, url):
-        for collection in self:
-            if collection.url_matches(url):
-                return collection
-        return None
+            view = TemplateView(self.app, url, template, self)
+        self.app.add_url_rule(url, url, view)
 
 
 ########## Flask App ##########
 
-def build_app():
-    app = Flask(__name__)
-    collections = ColllectionSet()
-    app.collections = collections
+class StaticGenApp(Flask):
 
-    # Setup Markdown Template Filter
+    def __init__(self, contents_dir, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.contents_dir = contents_dir
+
+        self.consumed_files = set()
+        self.generators = []
+
+    def consume(self, abspath):
+        self.consumed_files.add(abspath)
+
+    def is_consumed(self, abspath):
+        return abspath in self.consumed_files
+
+    def generate(self):
+        for generator in self.generators:
+            generator(self)
+
+    @property
+    def collections(self):
+        for generator in self.generators:
+            if generator.is_collection:
+                yield generator
+
+def build_app():
+    app = StaticGenApp(CONTENTS_DIR, __name__)
+
+    # Markdown Template Filter
     md_parser = Markdown()
     md_convert = lambda text: Markup(md_parser.reset().convert(text))
     app.add_template_filter(md_convert, "markdown")
 
-    # Read all _collection.yaml files
+    # Adding `Collection` generator for each _collection.yaml file
     for abspath, relpath, filename in walk_dir(CONTENTS_DIR):
         if filename == "_collection.yaml":
             url = contents_path_to_url(remove_suffix(relpath, "_collection.yaml"))
-            collection = Collection(abspath, url)
-            collections.add(collection)
+            generator = Collection(url, abspath)
+            app.generators.append(generator)
 
-    # Add special collection pages (indexes, tag pages, etc.)
-    to_exclude = set()
-    for collection in collections:
-        files_used = collection.register_pages(app)
-        if files_used:
-            to_exclude.update(files_used)
+    # Add template markdown generator
+    app.generators.append(MarkdownGenerator())
 
-    # Walk contents dir
-    for abspath, relpath, filename in walk_dir(CONTENTS_DIR, to_exclude):
-
-        # Serve markdown files
-        if matches_markdown(filename):
-            url = contents_path_to_url(remove_extenison(relpath))
-
-            # Add View
-            view = MarkdownView(url, md_file=abspath,
-                                collections=collections)
-            app.add_url_rule(url, url, view)
-
-        # Serve static files
-        elif matches_static(filename):
-            pass  #TODO
-
+    app.generate()
     return app
 
 def main(app):
