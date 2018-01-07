@@ -1,8 +1,11 @@
+
 name: blog
-title: blog title!
+order: date
 context:
     template: blog/post.html
 pages:
 
     - name: index
       template: blog/index.html
+      context:
+        blah: dat

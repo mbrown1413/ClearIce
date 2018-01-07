@@ -3,6 +3,7 @@ import os
 import sys
 from pprint import pprint
 from fnmatch import fnmatch
+from datetime import datetime
 
 from flask import Flask, render_template, Markup
 from flask_frozen import Freezer
@@ -138,11 +139,12 @@ class View():
 
 class TemplateView(View):
 
-    def __init__(self, app, url, template=None, collection=None):
+    def __init__(self, app, url, template=None, collection=None, context=None):
         self.app = app
         self.url = url
         self.template = template
         self.collection = collection
+        self.default_context = context
 
         self.context = self.get_context()
 
@@ -154,6 +156,7 @@ class TemplateView(View):
 
         context = {
             "url": self.url,
+            "app": self.app,
             "collections": self.app.collections,
             "collection": self.collection,
             "template": DEFAULT_TEMPLATE,
@@ -163,6 +166,10 @@ class TemplateView(View):
         # Context from collection
         if self.collection:
             context.update(self.collection.context)
+
+        # Context passed into view
+        if self.default_context:
+            context.update(self.default_context)
 
         # Template explicitly passed in
         if self.template:
@@ -177,12 +184,13 @@ class TemplateView(View):
             return render_template(template, **self.context)
         except TemplateNotFound as e:
             #TODO: Clarify where the user provided this template, so they can
-            #      go fix th eproblem!
+            #      go fix the problem!
             sys.stderr.write('Template not found: "{}"\n'.format(template))
             sys.exit(-1)
         except TemplateError as e:
             #TODO: Prettier error
-            sys.stderr.write('Error while processing template "{}" for url "{}"\n'.format(template, self.url))
+            sys.stderr.write('Error while processing template "{}" for url'
+                    '"{}"\n'.format(template, self.url))
             sys.stderr.write(e.message+'\n')
             if hasattr(e, "filename"):
                 sys.stderr.write("File: {}\n".format(e.filename))
@@ -194,14 +202,26 @@ class TemplateView(View):
 
 class MarkdownView(TemplateView):
 
-    def __init__(self, app, url, md_file, template=None, collection=None):
+    def __init__(self, md_file, *args, date_from_filename=True, **kwargs):
         self.md_file = md_file
+        self.date_from_filename = date_from_filename
         self.frontmatter, self.content = read_frontmatter_file(self.md_file)
-        super().__init__(app, url, template, collection)
+        super().__init__(*args, **kwargs)
 
     def get_context(self):
         context = super().get_context()
         context["content"] = self.content
+
+        if self.date_from_filename:
+            filename = os.path.basename(self.md_file)
+            if len(filename) >= 10:
+                date = None
+                try:
+                    date = datetime.strptime(filename[:10], "%Y-%m-%d").date()
+                except ValueError as e:
+                    pass
+                if date:
+                    context["date"] = date
 
         # Explicitly provided frontmatter overwrides all
         context.update(self.frontmatter)
@@ -249,7 +269,7 @@ class MarkdownGenerator(GeneratorBase):
                          fname_patterns=MARKDOWN_FILES)
         for abspath, relpath, filename in files:
             url = contents_path_to_url(remove_extension(relpath))
-            view = MarkdownView(app, url, abspath)
+            view = MarkdownView(abspath, app, url)
             app.add_url_rule(url, url, view)
             app.consume(abspath)
 
@@ -288,10 +308,22 @@ class Collection(GeneratorBase):
         for abspath, relpath, filename in files:
             url = contents_path_to_url(remove_extension(relpath))
             if self.url_is_item(url):
-                view = MarkdownView(app, url, abspath, collection=self)
+                view = MarkdownView(abspath, app, url, collection=self)
                 self.items.append(view)
                 app.consume(abspath)
                 app.add_url_rule(url, url, view)
+
+                if self.require_date and "date" not in view.context:
+                    #TODO: Better Error
+                    raise ValueError('Date required in collection items but none found in frontmatter or filename of "{}"'.format(abspath))
+
+        # Sort items
+        if self.item_order:
+            def sortfunc(item):
+                value = item.context.get(self.item_order, "")
+                return str(value).lower()
+            lambda item: str(item.context.get(self.item_order, "")).lower()
+            self.items =list(sorted(self.items, key=sortfunc))
 
     def url_is_item(self, url):
         # If `self.url` is in "/blog/", then "/blog/foo.md" and
@@ -314,9 +346,10 @@ class Collection(GeneratorBase):
                     '(in file "{}")'.format(type(data), self.yaml_path))
 
         self.name = data.pop("name", None)
-        self.title = data.pop("title", None)
         self.pages = data.pop("pages", [])
         self.context = data.pop("context", {})
+        self.item_order = data.pop("order", None)
+        self.require_date = data.pop("require_date", False)
 
         # Error on unexpected data
         if data:
@@ -327,6 +360,7 @@ class Collection(GeneratorBase):
     def register_page(self, page):
         name = page.pop("name")  #TODO: Graceful error when field not found.
         template = page.pop("template", None)
+        context = page.pop("context", {})
         #TODO: Context attribute in yaml
 
         # Unrecognized field error
@@ -348,10 +382,10 @@ class Collection(GeneratorBase):
         )
         #TODO: Error if "template" not provided
         if os.path.exists(md_path):
-            view = MarkdownView(self.app, url, md_path, template, self)
+            view = MarkdownView(md_path, self.app, url, template, self, context=context)
             self.app.consume(md_path)
         else:
-            view = TemplateView(self.app, url, template, self)
+            view = TemplateView(self.app, url, template, self, context=context)
         self.app.add_url_rule(url, url, view)
 
 
@@ -381,6 +415,16 @@ class StaticGenApp(Flask):
         for generator in self.generators:
             if generator.is_collection:
                 yield generator
+
+    def get_collection_by_name(self, name):
+        generator = self.get_generator_by_name(name)
+        if generator.is_collection:
+            return generator
+
+    def get_generator_by_name(self, name):
+        for generator in self.generators:
+            if hasattr(generator, "name") and generator.name == name:
+                return generator
 
 def build_app():
     app = StaticGenApp(CONTENTS_DIR, __name__)

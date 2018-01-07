@@ -1,8 +1,9 @@
 {% extends "layout.html" %}
 
-
 {% block content %}
-<a href="{{ collection.url }}">Back to Blog</a>
+<a href="{{ collection.url }}">Back to Blog</a><br>
+
+Date: {{ date.strftime("%d %b, %Y").lstrip("0") }}
 
 {{ content | markdown }}
 
