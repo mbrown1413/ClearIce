@@ -138,7 +138,7 @@ def read_frontmatter_file(filename):
 class View():
 
     def __call__(self):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
 
 class TemplateView(View):
 
@@ -261,7 +261,7 @@ class GeneratorBase():
         Produces content using `app.add_url_rule()` and consumes files in the
         contents directory using `app.consume()`.
         """
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
 
 class MarkdownGenerator(GeneratorBase):
     """Adds a `MarkdownView` url for every markdown file."""
@@ -456,4 +456,4 @@ def main():
     freezer.freeze()
 
 if __name__ == "__main__":
-    main()
+    main()  # pragma: no cover

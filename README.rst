@@ -7,4 +7,10 @@ ClearIce: A Static Site Generator
 Tests
 -----
 
-    $ python3 -m unittest test
+Running Tests:
+
+    $ python3 run_tests.py
+
+Test Coverage Report: (generates htmlcov/)
+
+    $ ~/ve3/bin/coverage html
