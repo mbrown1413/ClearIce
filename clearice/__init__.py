@@ -103,9 +103,12 @@ def walk_dir(root, exclude=(), subdir="", fname_patterns=None):
 
 def read_frontmatter_file(filename):
     """Returns (frontmatter dict, contents string)."""
-    lines = list(open(filename))
+    with open(filename) as f:
+        lines = list(f)
 
     # Find frontmatter markers
+    #TODO: If there is nothing after the frontmatter, the last "---" will not
+    #      have a newline at the end, and it will not be found.
     marker = "---\n"
     try:
         fm_start = lines.index(marker)
@@ -427,7 +430,7 @@ class StaticGenApp(Flask):
                 return generator
 
 def build_app():
-    app = StaticGenApp(CONTENTS_DIR, __name__)
+    app = StaticGenApp(CONTENTS_DIR, __name__, root_path=os.getcwd())
 
     # Markdown Template Filter
     md_parser = Markdown()
@@ -447,11 +450,10 @@ def build_app():
     app.generate()
     return app
 
-def main(app):
+def main():
+    app = build_app()
     freezer = Freezer(app)
     freezer.freeze()
 
-app = build_app()
-
 if __name__ == "__main__":
-    main(app)
+    main()
