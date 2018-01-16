@@ -8,7 +8,7 @@ from datetime import datetime
 from flask import Flask, render_template, Markup
 from flask_frozen import Freezer
 
-from jinja2.exceptions import TemplateError, TemplateNotFound
+import jinja2.exceptions
 
 import yaml
 from markdown import Markdown
@@ -19,6 +19,35 @@ DEFAULT_TEMPLATE = "default.html"
 IGNORED_FILES = [".*", "*~"]
 MARKDOWN_EXTENSIONS = [".md", ".markdown"]
 MARKDOWN_FILES = list("*"+ext for ext in MARKDOWN_EXTENSIONS)
+
+
+########## Exceptions ##########
+
+class ClearIceException(Exception): pass
+
+class FrontmatterError(ClearIceException):
+    def __init__(self, filename, msg):
+        self.filename = filename
+        self.msg = msg
+    def __str__(self):
+        return 'Error processing frontmatter ' \
+                'in {}:\n{}\n'.format(self.filename, self.msg)
+
+class TemplateError(ClearIceException): pass
+
+class TemplateNotFound(TemplateError):
+    def __init__(self, template_name):
+        self.template_name = template_name
+    def __str__(self):
+        return 'Template not found: "{}"\n'.format(self.template_name)
+
+class YamlDataError(ClearIceException):
+    def __init__(self, filename, underlying_exception=None):
+        self.filename = filename
+        self.e = underlying_exception
+    def __str__(self):
+        long_desc = ":\n{}".format(self.e) if self.e else ""
+        return 'Error reading data file "{}"{}'.format(self.filename, long_desc)
 
 
 ########## Filename and URL Helpers ##########
@@ -107,30 +136,32 @@ def read_frontmatter_file(filename):
         lines = list(f)
 
     # Find frontmatter markers
-    #TODO: If there is nothing after the frontmatter, the last "---" will not
-    #      have a newline at the end, and it will not be found.
     marker = "---\n"
+    fm_start = None
     try:
         fm_start = lines.index(marker)
         fm_end = lines.index(marker, fm_start+1)
     except ValueError:
-        sys.stderr.write('Error while processing template "{}":\n'.format(filename))
-        sys.stderr.write('Template must have opening and closing "---" frontmatter delimiters.\n')
-        sys.exit(-1)
+        # Allow last line to contain marker but no newline
+        if fm_start is not None and lines[-1] == marker[:-1]:
+            fm_end = len(lines)-1
+        else:
+            raise FrontmatterError(filename, 'Missing opening and closing '
+                    '"---" frontmatter delimiter lines.') from None
 
-    if fm_start != 0:
-        raise ValueError()  #TODO
+    # Ensure that all preceeding lines are blank
+    #TODO: Should we consider this to be no frontmatter instead of erroring?
+    if ''.join(lines[:fm_start]).strip():
+        raise FrontmatterError(filename, 'Frontmatter marker "---" may only '
+                'be preceeded by blank lines.') from None
 
     fm = yaml.load(''.join(lines[fm_start+1:fm_end]))
     if fm is None:
         fm = {}
 
-    #TODO:
-    #  - Ignore blank lines, only recognize first marker as first non-blank line.
-    #  - No markers present, assumed to be empty frontmatter.
-
     if type(fm) != dict:
-        raise ValueError()  #TODO
+        raise FrontmatterError(filename, 'Frontmatter must be a YAML mapping') \
+                from None
 
     content = ''.join(lines[fm_end+1:])
     return fm, content
@@ -185,12 +216,12 @@ class TemplateView(View):
         template = self.context["template"]
         try:
             return render_template(template, **self.context)
-        except TemplateNotFound as e:
+        except jinja2.exceptions.TemplateNotFound as e:
             #TODO: Clarify where the user provided this template, so they can
-            #      go fix the problem!
-            sys.stderr.write('Template not found: "{}"\n'.format(template))
-            sys.exit(-1)
-        except TemplateError as e:
+            #      go fix the problem! Maybe a more detailed description if
+            #      it's "default.html" that's missing.
+            raise TemplateNotFound(template) from None
+        except jinja2.exceptions.TemplateError as e:
             #TODO: Prettier error
             sys.stderr.write('Error while processing template "{}" for url'
                     '"{}"\n'.format(template, self.url))
@@ -214,6 +245,7 @@ class MarkdownView(TemplateView):
     def get_context(self):
         context = super().get_context()
         context["content"] = self.content
+        context["frontmatter"] = self.frontmatter
 
         if self.date_from_filename:
             filename = os.path.basename(self.md_file)
@@ -294,6 +326,9 @@ class Collection(GeneratorBase):
     def __iter__(self):
         return self.items.__iter__()
 
+    def __len__(self):
+        return len(self.items)
+
     def __call__(self, app):
         self.app = app
         self.data = self.read_yaml_data()
@@ -326,7 +361,7 @@ class Collection(GeneratorBase):
                 value = item.context.get(self.item_order, "")
                 return str(value).lower()
             lambda item: str(item.context.get(self.item_order, "")).lower()
-            self.items =list(sorted(self.items, key=sortfunc))
+            self.items = list(sorted(self.items, key=sortfunc))
 
     def url_is_item(self, url):
         # If `self.url` is in "/blog/", then "/blog/foo.md" and
@@ -343,14 +378,18 @@ class Collection(GeneratorBase):
         return self.url == url[:last_slash+1]
 
     def read_yaml_data(self):
-        data = yaml.load(open(self.yaml_path))
+        with open(self.yaml_path) as f:
+            try:
+                data = yaml.load(f)
+            except yaml.error.YAMLError as e:
+                raise YamlDataError(self.yaml_path, e) from None
         if not isinstance(data, dict):
             raise ValueError('Expected dict describing collection, got "{}"'
                     '(in file "{}")'.format(type(data), self.yaml_path))
 
-        self.name = data.pop("name", None)
-        self.pages = data.pop("pages", [])
-        self.context = data.pop("context", {})
+        self.name = data.pop("name", "") or ""
+        self.pages = data.pop("pages", []) or []
+        self.context = data.pop("context", {}) or {}
         self.item_order = data.pop("order", None)
         self.require_date = data.pop("require_date", False)
 
@@ -399,6 +438,11 @@ class StaticGenApp(Flask):
     def __init__(self, contents_dir, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.contents_dir = contents_dir
+
+        # Normally, exceptions that occur when a url is requested are caught by
+        # flask and a 500 status is returned. This causes the exception to be
+        # propogated instead. See `flask.Flask.test_client()`.
+        self.testing = True
 
         self.consumed_files = set()
         self.generators = []
@@ -450,10 +494,17 @@ def build_app():
     app.generate()
     return app
 
-def main():
-    app = build_app()
-    freezer = Freezer(app)
-    freezer.freeze()
+def main(catch_exceptions=True):
+    to_catch = ()
+    if catch_exceptions:  # pragma: no cover
+        to_catch = ClearIceException  # pragma: no cover
+    try:
+        app = build_app()
+        freezer = Freezer(app)
+        freezer.freeze()
+    except to_catch as e:
+        sys.stderr.write(str(e)+'\n')  # pragma: no cover
+        sys.exit(-1)  # pragma: no cover
 
 if __name__ == "__main__":
     main()  # pragma: no cover
