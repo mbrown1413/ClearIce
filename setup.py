@@ -27,7 +27,7 @@ setup(
     ],
     keywords=["generator", "static website", "html"],
     packages=["clearice"],
-    #test_suite="test",
+    test_suite="test",
     license="LICENSE.txt",
     install_requires=[
         "Flask",

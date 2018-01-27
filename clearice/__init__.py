@@ -1,7 +1,6 @@
 
 import os
 import sys
-from pprint import pprint
 from fnmatch import fnmatch
 from datetime import datetime
 
@@ -13,7 +12,7 @@ import jinja2.exceptions
 import yaml
 from markdown import Markdown
 
-CONTENTS_DIR = "contents/"
+CONTENT_DIR = "content/"
 DEFAULT_TEMPLATE = "default.html"
 
 IGNORED_FILES = [".*", "*~"]
@@ -22,6 +21,8 @@ MARKDOWN_FILES = list("*"+ext for ext in MARKDOWN_EXTENSIONS)
 
 
 ########## Exceptions ##########
+# Some of these are basically duplicate exceptions of the libraries we use,
+# providing more detail of the context which the error ocurred.
 
 class ClearIceException(Exception): pass
 
@@ -33,6 +34,14 @@ class FrontmatterError(ClearIceException):
         return 'Error processing frontmatter ' \
                 'in {}:\n{}\n'.format(self.filename, self.msg)
 
+class ConfigError(ClearIceException):
+    def __init__(self, filename, msg):
+        self.filename = filename
+        self.msg = msg
+    def __str__(self):
+        return 'Configuration error in "{}"\n' \
+                '{}'.format(self.filename, self.msg)
+
 class TemplateError(ClearIceException): pass
 
 class TemplateNotFound(TemplateError):
@@ -41,13 +50,13 @@ class TemplateNotFound(TemplateError):
     def __str__(self):
         return 'Template not found: "{}"\n'.format(self.template_name)
 
-class YamlDataError(ClearIceException):
+class YamlError(ClearIceException):
     def __init__(self, filename, underlying_exception=None):
         self.filename = filename
         self.e = underlying_exception
     def __str__(self):
         long_desc = ":\n{}".format(self.e) if self.e else ""
-        return 'Error reading data file "{}"{}'.format(self.filename, long_desc)
+        return 'Error reading yaml file "{}"{}'.format(self.filename, long_desc)
 
 
 ########## Filename and URL Helpers ##########
@@ -63,7 +72,7 @@ def remove_prefix(s, prefix):
     assert s.startswith(prefix)
     return s[len(prefix):]
 
-def contents_path_to_url(path):
+def normalize_url(path):
     url = path
 
     # Does not remove filename extensions
@@ -86,6 +95,10 @@ def contents_path_to_url(path):
         url = '/' + url
     if not url.endswith("/"):
         url = url + '/'
+
+    # Exactly one '/' between each part
+    while '//' in url:
+        url = url.replace('//', '/')
 
     assert url.startswith('/') and url.endswith('/')
     return url
@@ -127,6 +140,34 @@ def walk_dir(root, exclude=(), subdir="", fname_patterns=None):
                 continue
             yield abspath, relpath, filename
 
+def str_to_date(s):
+    date = None
+    leftover = s
+    try:
+        date = datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except ValueError as e:
+        pass
+    if date:
+        leftover = s[10:]
+
+    return date, leftover
+
+def extract_info_from_filename(fname):
+    fname = remove_extension(fname)
+    info = {}
+
+    # Extract date
+    date, fname = str_to_date(fname)
+    if date:
+        info['date'] = date
+        if fname[0] == '_':  # Common to have "date_slug.md". Remove the '_'
+            fname = fname[1:]
+
+    #TODO: Slugify
+    info['slug'] = fname
+
+    return info
+
 
 ########## Views ##########
 
@@ -155,7 +196,12 @@ def read_frontmatter_file(filename):
         raise FrontmatterError(filename, 'Frontmatter marker "---" may only '
                 'be preceeded by blank lines.') from None
 
-    fm = yaml.load(''.join(lines[fm_start+1:fm_end]))
+    yaml_lines = lines[fm_start+1:fm_end]
+
+    try:
+        fm = yaml.load(''.join(yaml_lines))
+    except ValueError as e:
+        raise FrontmatterError(filename, e)
     if fm is None:
         fm = {}
 
@@ -189,6 +235,7 @@ class TemplateView(View):
         # Order is important here: some sources will overwrite others.
 
         context = {
+            "self": self,
             "url": self.url,
             "app": self.app,
             "collections": self.app.collections,
@@ -212,7 +259,6 @@ class TemplateView(View):
         return context
 
     def __call__(self):
-        #TODO: Error if template not specified
         template = self.context["template"]
         try:
             return render_template(template, **self.context)
@@ -222,23 +268,18 @@ class TemplateView(View):
             #      it's "default.html" that's missing.
             raise TemplateNotFound(template) from None
         except jinja2.exceptions.TemplateError as e:
-            #TODO: Prettier error
-            sys.stderr.write('Error while processing template "{}" for url'
-                    '"{}"\n'.format(template, self.url))
-            sys.stderr.write(e.message+'\n')
-            if hasattr(e, "filename"):
-                sys.stderr.write("File: {}\n".format(e.filename))
-            if hasattr(e, "lineno"):
-                sys.stderr.write("Line: {}\n".format(e.lineno))
-            sys.stderr.write("\nTemplate Context: ")
-            pprint(self.context, stream=sys.stderr)
-            sys.exit(-1)
+            #TODO: Include context? It's helpful on variable undefined error.
+            #TODO: Move some of this printing logic into exception class.
+            file_msg = "in "+e.filename if hasattr(e, "filename") else ""
+            line_msg = " on line "+str(e.lineno) if hasattr(e, "lineno") else ""
+            raise TemplateError('Error while processing template "{}" for url '
+                '"{}":\n  {}\n{}{}'.format(template, self.url,
+                e.message, file_msg, line_msg)) from None
 
 class MarkdownView(TemplateView):
 
-    def __init__(self, md_file, *args, date_from_filename=True, **kwargs):
+    def __init__(self, md_file, *args, **kwargs):
         self.md_file = md_file
-        self.date_from_filename = date_from_filename
         self.frontmatter, self.content = read_frontmatter_file(self.md_file)
         super().__init__(*args, **kwargs)
 
@@ -247,23 +288,12 @@ class MarkdownView(TemplateView):
         context["content"] = self.content
         context["frontmatter"] = self.frontmatter
 
-        if self.date_from_filename:
-            filename = os.path.basename(self.md_file)
-            if len(filename) >= 10:
-                date = None
-                try:
-                    date = datetime.strptime(filename[:10], "%Y-%m-%d").date()
-                except ValueError as e:
-                    pass
-                if date:
-                    context["date"] = date
+        # Extract info (like date and slug) from filename
+        filename = os.path.basename(self.md_file)
+        context.update(extract_info_from_filename(filename))
 
         # Explicitly provided frontmatter overwrides all
         context.update(self.frontmatter)
-
-        # Default title to last part of url
-        if "title" not in context:
-            context["title"] = self.url.strip("/").split("/")[-1] or "home"
 
         return context
 
@@ -303,7 +333,7 @@ class MarkdownGenerator(GeneratorBase):
                          exclude=app.consumed_files,
                          fname_patterns=MARKDOWN_FILES)
         for abspath, relpath, filename in files:
-            url = contents_path_to_url(remove_extension(relpath))
+            url = normalize_url(remove_extension(relpath))
             view = MarkdownView(abspath, app, url)
             app.add_url_rule(url, url, view)
             app.consume(abspath)
@@ -323,15 +353,20 @@ class Collection(GeneratorBase):
         self.yaml_path = yaml_path
         self.items = []
 
+        self.read_yaml_data()
+
     def __iter__(self):
         return self.items.__iter__()
 
     def __len__(self):
         return len(self.items)
 
+    def __bool__(self):
+        # Empty collections should evaluate to True.
+        return True
+
     def __call__(self, app):
         self.app = app
-        self.data = self.read_yaml_data()
         self.app.consume(self.yaml_path)
 
         # Register static pages
@@ -344,23 +379,23 @@ class Collection(GeneratorBase):
                          subdir=remove_prefix(self.url, '/'),
                          fname_patterns=MARKDOWN_FILES)
         for abspath, relpath, filename in files:
-            url = contents_path_to_url(remove_extension(relpath))
+            url = normalize_url(remove_extension(relpath))
             if self.url_is_item(url):
                 view = MarkdownView(abspath, app, url, collection=self)
+
+                #TODO: URL transformation here, according to collection
+                #      "item_urls" property. Set set view.url and
+                #      view.context['url'].
+
                 self.items.append(view)
                 app.consume(abspath)
                 app.add_url_rule(url, url, view)
-
-                if self.require_date and "date" not in view.context:
-                    #TODO: Better Error
-                    raise ValueError('Date required in collection items but none found in frontmatter or filename of "{}"'.format(abspath))
 
         # Sort items
         if self.item_order:
             def sortfunc(item):
                 value = item.context.get(self.item_order, "")
                 return str(value).lower()
-            lambda item: str(item.context.get(self.item_order, "")).lower()
             self.items = list(sorted(self.items, key=sortfunc))
 
     def url_is_item(self, url):
@@ -382,53 +417,72 @@ class Collection(GeneratorBase):
             try:
                 data = yaml.load(f)
             except yaml.error.YAMLError as e:
-                raise YamlDataError(self.yaml_path, e) from None
+                raise YamlError(self.yaml_path, e) from None
+        if data is None:
+            data = {}
         if not isinstance(data, dict):
-            raise ValueError('Expected dict describing collection, got "{}"'
-                    '(in file "{}")'.format(type(data), self.yaml_path))
+            raise ConfigError(self.yaml_path, 'Expected dict describing '
+                    'collection, got "{}"'.format(type(data)))
 
         self.name = data.pop("name", "") or ""
         self.pages = data.pop("pages", []) or []
         self.context = data.pop("context", {}) or {}
         self.item_order = data.pop("order", None)
-        self.require_date = data.pop("require_date", False)
 
         # Error on unexpected data
         if data:
-            #TODO: Better error message
-            raise ValueError('Unexpected fields {} in collection'
-                    '(in file "{}")'.format(list(data.keys()), self.yaml_path))
+            raise ConfigError(self.yaml_path, 'Unexpected collection fields: '
+                    '{}'.format(list(data.keys())))
 
     def register_page(self, page):
-        name = page.pop("name")  #TODO: Graceful error when field not found.
+        if not isinstance(page, dict):
+            raise ConfigError(self.yaml_path, 'Expected dict describing '
+                'page, got "{}"'.format(type(page)))
+        title = page.pop("title", None)
         template = page.pop("template", None)
         context = page.pop("context", {})
-        #TODO: Context attribute in yaml
+
+        if title is None:
+            raise ConfigError(self.yaml_path, 'Collection pages must have a '
+                    'title')
+        if not isinstance(title, str):
+            raise ConfigError(self.yaml_path, 'Page title must be '
+                    'a non-zero length string (not {})'.format(title))
 
         # Unrecognized field error
         if page:
-            #TODO: Better error message
-            raise ValueError('Unexpected fields {} in page of collection'
-                    '(in file "{}")'.format(list(page.keys()), self.yaml_path))
+            raise ConfigError(self.yaml_path, 'Unexpected fields in '
+                    'collection page: {}'.format(list(page.keys())))
 
-        url = self.url + name
-        if name.endswith("index"):
-            url = remove_suffix(url, "index")
-        else:
-            url += "/"
+        if title[0] == '/':
+            raise ConfigError(self.yaml_path, 'Collection page names cannot '
+                    'start with a "/" (unlike "{}")'.format(title))
+
+        #TODO: Slugify
+        url = normalize_url(self.url + title)
 
         #TODO: Use `MARKDOWN_EXTENSIONS` to consider both .md and .markdown
         md_path = os.path.join(
-            os.path.abspath(CONTENTS_DIR),
-            self.url[1:] + name + ".md"
+            os.path.abspath(CONTENT_DIR),
+            self.url[1:] + title + ".md"
         )
-        #TODO: Error if "template" not provided
         if os.path.exists(md_path):
             view = MarkdownView(md_path, self.app, url, template, self, context=context)
             self.app.consume(md_path)
         else:
+            context.setdefault("content", "")
             view = TemplateView(self.app, url, template, self, context=context)
-        self.app.add_url_rule(url, url, view)
+
+        try:
+            self.app.add_url_rule(url, url, view)
+        except AssertionError as e:
+            if str(e).startswith("View function mapping is overwriting an "
+                                 "existing endpoint function:"):
+                raise ConfigError(self.yaml_path, 'Page title "{}" with url '
+                        '"{}" conflicts with an existing url.'.format(
+                        title, url))
+            else:
+                raise  # pragma: no cover
 
 
 ########## Flask App ##########
@@ -445,7 +499,8 @@ class StaticGenApp(Flask):
         self.testing = True
 
         self.consumed_files = set()
-        self.generators = []
+        self._generators = []
+        self.collections = Collections(self)
 
     def consume(self, abspath):
         self.consumed_files.add(abspath)
@@ -453,28 +508,40 @@ class StaticGenApp(Flask):
     def is_consumed(self, abspath):
         return abspath in self.consumed_files
 
+    def add_generator(self, gen):
+
+        # Check name for uniqueness
+        if hasattr(gen, 'name'):
+            for gen2 in self._generators:
+                if hasattr(gen2, 'name') and gen.name == gen2.name:
+                    raise ConfigError(None, 'Cannot have two generators with '
+                            'the same name "{}"'.format(gen.name))
+
+        self._generators.append(gen)
+
     def generate(self):
-        for generator in self.generators:
+        for generator in self._generators:
             generator(self)
 
-    @property
-    def collections(self):
-        for generator in self.generators:
-            if generator.is_collection:
-                yield generator
+class Collections():
+    """Passthrough object for handy access in templates."""
 
-    def get_collection_by_name(self, name):
-        generator = self.get_generator_by_name(name)
-        if generator.is_collection:
-            return generator
+    def __init__(self, app):
+        self.app = app
 
-    def get_generator_by_name(self, name):
-        for generator in self.generators:
-            if hasattr(generator, "name") and generator.name == name:
-                return generator
+    def __iter__(self):
+        return filter(lambda g: g.is_collection, self.app._generators)
+
+    def __getattr__(self, name):
+        for c in self:
+            if c.name == name:
+                return c
+
+    def __len__(self):
+        return sum([1 for collection in self])
 
 def build_app():
-    app = StaticGenApp(CONTENTS_DIR, __name__, root_path=os.getcwd())
+    app = StaticGenApp(CONTENT_DIR, __name__, root_path=os.getcwd())
 
     # Markdown Template Filter
     md_parser = Markdown()
@@ -482,14 +549,14 @@ def build_app():
     app.add_template_filter(md_convert, "markdown")
 
     # Adding `Collection` generator for each _collection.yaml file
-    for abspath, relpath, filename in walk_dir(CONTENTS_DIR):
+    for abspath, relpath, filename in walk_dir(CONTENT_DIR):
         if filename == "_collection.yaml":
-            url = contents_path_to_url(remove_suffix(relpath, "_collection.yaml"))
+            url = normalize_url(remove_suffix(relpath, "_collection.yaml"))
             generator = Collection(url, abspath)
-            app.generators.append(generator)
+            app.add_generator(generator)
 
     # Add template markdown generator
-    app.generators.append(MarkdownGenerator())
+    app.add_generator(MarkdownGenerator())
 
     app.generate()
     return app
@@ -505,6 +572,8 @@ def main(catch_exceptions=True):
     except to_catch as e:
         sys.stderr.write(str(e)+'\n')  # pragma: no cover
         sys.exit(-1)  # pragma: no cover
+
+    return app
 
 if __name__ == "__main__":
     main()  # pragma: no cover

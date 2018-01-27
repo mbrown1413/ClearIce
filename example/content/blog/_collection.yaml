@@ -5,7 +5,7 @@ context:
     template: blog/post.html
 pages:
 
-    - name: index
+    - title: index
       template: blog/index.html
       context:
         blah: dat
