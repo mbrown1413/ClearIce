@@ -382,8 +382,34 @@ class TestCollections(BaseTest):
         self.assertFileContents("build/blog/item4/index.html", "third. second third fourth first ")
 
     def test_non_item_file(self):
-        self.write_file("content/blog/blah.yaml", "")
-        self.test_simple()
+        self.write_file("content/blog/_collection.yaml", """
+            name: blog
+            order: title
+            pages:
+                - title: index
+                  template: blog/index.html
+        """)
+        self.write_file("templates/default.html",
+                "{{ title }}")
+        self.write_file("templates/blog/index.html",
+                "{% for post in collections.blog %}{{ post.url }} {% endfor %}")
+        self.write_file("content/blog/item1.md",
+                "---\ntitle: Item 1\n---")
+        self.write_file("content/blog/item2.md",
+                "---\ntitle: Item 2\n---")
+        self.write_file("content/blog/item3/index.md", "---\ntitle: Item 3\n---")
+        self.write_file("content/blog/item3/supplimental_content.md", "---\n---")
+        self.write_file("content/blog/not_an_item.yaml", "")
+        self.generate()
+        self.assertFileContents("build/blog/item1/index.html", "Item 1")
+        self.assertFileContents("build/blog/item2/index.html", "Item 2")
+        self.assertFileContents("build/blog/item3/index.html", "Item 3")
+        self.assertFileContents("build/blog/item3/supplimental_content/index.html", "")
+        self.assertFileContents("build/blog/index.html",
+                "/blog/item1/ /blog/item2/ /blog/item3/ ")
+
+        # We don't copy over unknown files. In the future, specific unhandled
+        # data file extensions will be copied though.
         self.assertFalse(self.app.is_consumed("blog/blah.yaml"))
 
     def test_blank_yaml(self):
@@ -568,3 +594,34 @@ class TestCollections(BaseTest):
         self.assertFileContents("build/blog1/item/index.html",
                 "/blog1/item/, bar, /blog1/, blah, content!\n"
                 "blog2 blog1 ")
+
+    def test_url_format(self):
+        self.write_file("content/blog/_collection.yaml", """
+            name: blog
+            context:
+                foo: bar
+            url_format: "{{ foo }}/{{ date }}/{{ page_data }}"
+        """)
+        self.write_file("templates/default.html",
+                "{{ url }}")
+        self.write_file("content/blog/item.md", "---\npage_data: blah\ndate: 2012-12-21\n---\n")
+        self.generate()
+
+        self.assertFileContents("build/blog/bar/2012-12-21/blah/index.html",
+                "/blog/bar/2012-12-21/blah/")
+
+    def test_url_format_errors(self):
+        formats = [
+            "{%",
+            "{{ blah|blah }}",
+            "/this/",
+        ]
+        for fmt in formats:
+            with self.subTest(fmt=fmt):
+                self.write_file("content/blog/_collection.yaml", """
+                    url_format: "{}"
+                """.format(fmt))
+                self.write_file("templates/default.html", "")
+                self.write_file("content/blog/item.md", "---\n---")
+                with self.assertRaises(clearice.ConfigError):
+                    self.generate()

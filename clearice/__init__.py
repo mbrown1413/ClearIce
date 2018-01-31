@@ -7,6 +7,7 @@ from datetime import datetime
 from flask import Flask, render_template, Markup
 from flask_frozen import Freezer
 
+from jinja2 import Template
 import jinja2.exceptions
 
 import yaml
@@ -219,7 +220,7 @@ class View():
 
 class TemplateView(View):
 
-    def __init__(self, app, url, template=None, collection=None, context=None):
+    def __init__(self, app, url=None, template=None, collection=None, context=None):
         self.app = app
         self.url = url
         self.template = template
@@ -230,6 +231,10 @@ class TemplateView(View):
 
     def __getitem__(self, key):
         return self.context[key]
+
+    def set_url(self, url):
+        self.url = url
+        self.context["url"] = url
 
     def get_context(self):
         # Order is important here: some sources will overwrite others.
@@ -259,6 +264,8 @@ class TemplateView(View):
         return context
 
     def __call__(self):
+        if not self.url:
+            raise RuntimeError("Programmer error: url should have been set")
         template = self.context["template"]
         try:
             return render_template(template, **self.context)
@@ -374,18 +381,11 @@ class Collection(GeneratorBase):
             self.register_page(page)
 
         # Find and collect items
-        files = walk_dir(app.contents_dir,
-                         exclude=app.consumed_files,
-                         subdir=remove_prefix(self.url, '/'),
-                         fname_patterns=MARKDOWN_FILES)
-        for abspath, relpath, filename in files:
-            url = normalize_url(remove_extension(relpath))
-            if self.url_is_item(url):
-                view = MarkdownView(abspath, app, url, collection=self)
-
-                #TODO: URL transformation here, according to collection
-                #      "item_urls" property. Set set view.url and
-                #      view.context['url'].
+        for abspath, relpath, filename in self.get_item_files(app):
+            if self.file_is_item(app, abspath, relpath, filename):
+                view = MarkdownView(abspath, app, collection=self)
+                url = self.file_to_url(app, view, abspath, relpath, filename)
+                view.set_url(url)
 
                 self.items.append(view)
                 app.consume(abspath)
@@ -398,19 +398,38 @@ class Collection(GeneratorBase):
                 return str(value).lower()
             self.items = list(sorted(self.items, key=sortfunc))
 
-    def url_is_item(self, url):
+    def get_item_files(self, app):
+        return walk_dir(app.contents_dir,
+                        exclude=app.consumed_files,
+                        subdir=remove_prefix(self.url, '/'),
+                        fname_patterns=MARKDOWN_FILES)
+
+    def file_is_item(self, app, abspath, relpath, filename):
         # If `self.url` is in "/blog/", then "/blog/foo.md" and
         # "/blog/bar/index.md" will be considered items.
 
-        # Remove last part of the given url separated by slashes. If it
-        # matches the collection's url, it's an item.
+        # Remove last part of url separated by slashes. If it matches the
+        # collection's url, it's an item.
+        url = normalize_url(remove_extension(relpath))
         if url.endswith('/'):
             url = url[:-1]
         try:
             last_slash = url.rindex('/')
         except ValueError:
             return False
-        return self.url == url[:last_slash+1]
+        return url[:last_slash+1] == self.url
+
+    def file_to_url(self, app, view, abspath, relpath, filename):
+        if self.url_format:
+            try:
+                template = Template(self.url_format)
+                url = template.render(view.context)
+            except jinja2.exceptions.TemplateError as e:
+                raise ConfigError(self.yaml_path, 'Error with url format: '
+                        '{}'.format(e)) from None
+            return normalize_url(self.url + url)
+        else:
+            return normalize_url(remove_extension(relpath))
 
     def read_yaml_data(self):
         with open(self.yaml_path) as f:
@@ -424,10 +443,17 @@ class Collection(GeneratorBase):
             raise ConfigError(self.yaml_path, 'Expected dict describing '
                     'collection, got "{}"'.format(type(data)))
 
+        #TODO: Error if field isn't correct type.
         self.name = data.pop("name", "") or ""
         self.pages = data.pop("pages", []) or []
         self.context = data.pop("context", {}) or {}
         self.item_order = data.pop("order", None)
+        self.url_format = data.pop("url_format", None)
+
+        if self.url_format and self.url_format.startswith('/'):
+            raise ConfigError(self.yaml_path, 'Collection url formats are '
+                    'relative to the collection root, they cannot start with '
+                    'a "/".')
 
         # Error on unexpected data
         if data:
