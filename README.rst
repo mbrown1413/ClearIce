@@ -7,10 +7,8 @@ ClearIce: A Static Site Generator
 Tests
 -----
 
-Running Tests:
+Running Tests:  (requires `nose` and `coverage`)
 
-    $ python3 run_tests.py
+    $ nosetests
 
-Test Coverage Report: (generates htmlcov/)
-
-    $ ~/ve3/bin/coverage html
+Coverage report generated in `cover/`.

@@ -56,8 +56,9 @@ class BaseTest(unittest.TestCase):
                 self.assertIn(relpath, self.paths_accounted_for)
 
     def generate(self):
-        os.chdir(self.tmp_dir)
-        self.app = clearice.cli.main(catch_exceptions=False)
+        self.app = clearice.app.App(root_path=self.tmp_dir)
+        self.app.generate()
+        self.assertTrue(os.path.exists(os.path.join(self.tmp_dir, "build")))
         return self.app
 
     def tearDown(self):

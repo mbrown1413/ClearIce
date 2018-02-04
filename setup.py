@@ -27,7 +27,6 @@ setup(
     ],
     keywords=["generator", "static website", "html"],
     packages=["clearice"],
-    test_suite="test",
     license="LICENSE.txt",
     install_requires=[
         "Flask",
@@ -37,7 +36,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "clearice=clearice.cli:main",
+            "clearice=clearice.__main__:main",
         ],
     },
 )
