@@ -17,8 +17,11 @@ class ConfigError(ClearIceException):
         self.filename = filename
         self.msg = msg
     def __str__(self):
-        return 'Configuration error in "{}"\n' \
-                '{}'.format(self.filename, self.msg)
+        if self.filename:
+            return 'Configuration error in "{}"\n' \
+                    '{}'.format(self.filename, self.msg)
+        else:
+            return 'Configuration error: {}'.format(self.msg)
 
 class TemplateError(ClearIceException): pass
 

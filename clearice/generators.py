@@ -82,6 +82,8 @@ class Collection(GeneratorBase):
         self.app.consume(self.yaml_path)
 
         # Register static pages
+        if not isinstance(self.pages, list):
+            raise ConfigError(self.yaml_path, '"pages" field must be a list')
         for page in self.pages:
             self.register_page(page)
 
@@ -116,12 +118,8 @@ class Collection(GeneratorBase):
         # Remove last part of url separated by slashes. If it matches the
         # collection's url, it's an item.
         url = normalize_url(remove_extension(relpath))
-        if url.endswith('/'):
-            url = url[:-1]
-        try:
-            last_slash = url.rindex('/')
-        except ValueError:
-            return False
+        url = url[:-1]  # Remove last '/'
+        last_slash = url.rindex('/')
         return url[:last_slash+1] == self.url
 
     def file_to_url(self, app, view, abspath, relpath, filename):
@@ -164,7 +162,7 @@ class Collection(GeneratorBase):
 
         # Error on unexpected data
         if data:
-            raise ConfigError(self.yaml_path, 'Unexpected collection fields: '
+            raise ConfigError(self.yaml_path, 'Unexpected fields: '
                     '{}'.format(list(data.keys())))
 
     def register_page(self, page):

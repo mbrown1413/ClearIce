@@ -68,30 +68,34 @@ class TestCollection(BaseTest):
 
         # YAML parsing error
         self.write_file("content/blog/_collection.yaml", "blah: -")
-        with self.assertRaises(clearice.exceptions.YamlError):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.YamlError,
+            "\nsequence entries are not allowed here\n"
+        )
 
         # Valid YAML, bad config
-        yaml_to_test = [
-            """
+        to_test = [
+            ("""
                 - config_is
                 - not_a
                 - dictionary
-            """,
-            """
+            """, "Expected dict describing collection"),
+            ("""
                 name: blog
                 unexpected_field: foo
                 pages:
                     - title: index
                       template: test_page.html
-            """
+            """, "Unexpected fields")
         ]
-        for yaml_str in yaml_to_test:
+        for yaml_str, failure_regex in to_test:
             with self.subTest(yaml=yaml_str):
                 self.write_file("content/blog/_collection.yaml", yaml_str)
                 self.write_file("templates/default.html", "{{ url }}")
-                with self.assertRaises(clearice.exceptions.ConfigError):
-                    self.generate()
+                self.assertGenerateRaises(
+                    clearice.exceptions.ConfigError,
+                    failure_regex
+                )
 
     def test_item_order(self):
 
@@ -190,8 +194,6 @@ class TestCollection(BaseTest):
         self.assertFileContents("build/blog/item1/index.html", "Item 1")
         self.assertFileContents("build/blog/item2/index.html", "Item 2")
 
-
-
     def test_pages(self):
         self.write_file("content/blog/_collection.yaml", """
             name: blog
@@ -234,68 +236,73 @@ class TestCollection(BaseTest):
         self.assertFileContents("build/blog/subdir/page3/index.html", "/blog/subdir/page3/")
 
     def test_page_bad_config(self):
-        yaml_to_test = [
-            """
+        to_test = [
+            ("""
                 pages:
                     - title: /subdir/page1
-            """,
-            """
+            """, 'Collection page names cannot start with a "/"'),
+            ("""
                 pages:
                     - foo: bar
-            """,
-            """
+            """, "Collection pages must have a title"),
+            ("""
                 pages:
                     -
-            """,
-            """
+            """, "Expected dict describing page"),
+            ("""
                 pages:
                     - title: foo
                     - title: foo
-            """,
-            """
+            """, 'Page title "foo" with url "/blog/foo/" conflicts with an existing url.'),
+            ("""
                 pages:
                     - title:
                         foo: bar
                     - title: foo
-            """,
-            """
+            """, "Page title must be a non-zero length string"),
+            ("""
                 pages:
                     - title: index
                       extraneous_field: foo
-            """,
-            """
+            """, "Unexpected fields in collection page"),
+            ("""
                 pages:
                     not_a: list
-            """,
-            """
+            """, '"pages" field must be a list'),
+            ("""
                 pages:
                     - not_a_dict
-            """,
+            """, "Expected dict describing page"),
         ]
-        for yaml_str in yaml_to_test:
+        for yaml_str, failure_regex in to_test:
             with self.subTest(yaml=yaml_str):
                 self.write_file("content/blog/_collection.yaml", yaml_str)
                 self.write_file("templates/default.html", "{{ url }}")
-                with self.assertRaises(clearice.exceptions.ConfigError):
-                    self.generate()
+                self.assertGenerateRaises(
+                    clearice.exceptions.ConfigError,
+                    failure_regex,
+                )
 
     def test_extra_yaml_keys(self):
         tests = [
-            """
+            ("""
                 name: blog
                 extraneous_field: foo
-            """,
-            """
+            """, "Unexpected field"),
+            ("""
                 name: blog
                 pages:
-                    extraneous_field: foo
-            """,
+                    - title: blah
+                      extraneous_field: foo
+            """, "Unexpected fields in collection page:"),
         ]
-        for yaml_txt in tests:
+        for yaml_txt, failure_regex in tests:
             with self.subTest(config=yaml_txt):
                 self.write_file("content/blog/_collection.yaml", yaml_txt)
-                with self.assertRaises(clearice.exceptions.ConfigError):
-                    self.generate()
+                self.assertGenerateRaises(
+                    clearice.exceptions.ConfigError,
+                    failure_regex
+                )
 
     def test_name(self):
         self.write_file("content/blog1/_collection.yaml", """
@@ -322,8 +329,10 @@ class TestCollection(BaseTest):
         self.write_file("content/blog2/_collection.yaml", """
             name: blog
         """)
-        with self.assertRaises(clearice.exceptions.ConfigError):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.ConfigError,
+            "Configuration error: Cannot have two generators with the same name \"blog\""
+        )
 
     def test_collection_name_not_found(self):
         self.write_file("content/blog1/_collection.yaml", """
@@ -378,16 +387,18 @@ class TestCollection(BaseTest):
 
     def test_url_format_errors(self):
         formats = [
-            "{%",
-            "{{ blah|blah }}",
-            "/this/",
+            ("{%",              "Error with url format: tag name expected"),
+            ("{{ blah|blah }}", "Error with url format: no filter named 'blah'"),
+            ("/this/",          'Collection url formats are relative to the collection root, they cannot start with a "/"'),
         ]
-        for fmt in formats:
+        for fmt, failure_regex in formats:
             with self.subTest(fmt=fmt):
                 self.write_file("content/blog/_collection.yaml", """
                     url_format: "{}"
                 """.format(fmt))
                 self.write_file("templates/default.html", "")
                 self.write_file("content/blog/item.md", "---\n---")
-                with self.assertRaises(clearice.exceptions.ConfigError):
-                    self.generate()
+                self.assertGenerateRaises(
+                    clearice.exceptions.ConfigError,
+                    failure_regex
+                )

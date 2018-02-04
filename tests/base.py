@@ -55,10 +55,15 @@ class BaseTest(unittest.TestCase):
 
                 self.assertIn(relpath, self.paths_accounted_for)
 
-    def generate(self):
-        self.app = clearice.app.App(root_path=self.tmp_dir)
+    def assertGenerateRaises(self, *args, **kwargs):
+        with self.assertRaisesRegex(*args, **kwargs):
+            self.generate()
+
+    def generate(self, **kwargs):
+        if "root_path" not in kwargs:
+            kwargs["root_path"] = self.tmp_dir
+        self.app = clearice.app.App(**kwargs)
         self.app.generate()
-        self.assertTrue(os.path.exists(os.path.join(self.tmp_dir, "build")))
         return self.app
 
     def tearDown(self):

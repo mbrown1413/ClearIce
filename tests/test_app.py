@@ -1,4 +1,6 @@
 
+import os
+
 import clearice
 
 from .base import BaseTest
@@ -38,28 +40,34 @@ class TestApp(BaseTest):
             "\n\n---\n---\nblah",  # Preceeding blank lines
             "\n   \n \t \n---\n---\nblah",  # With whitespace
         ]
-        for test in tests:
-            with self.subTest(md=test):
-                self.write_file("content/index.md", test)  # No delimiters
-                self.assertFileContents("content/index.md", test)
+        for md in tests:
+            with self.subTest(md=md):
+                self.write_file("content/index.md", md)  # No delimiters
+                self.assertFileContents("content/index.md", md)
                 self.generate()
 
     def test_frontmatter_delimiter_errors(self):
         self.write_file("templates/default.html", "{{ content }}")
         self.account_for_file("build/index.html")
+        missing_delimiter_lines_msg = 'Missing opening and closing "---" ' \
+                                      'frontmatter delimiter lines.'
+        delimiter_not_first_msg = 'Frontmatter marker "---" may only be '\
+                                  'preceeded by blank lines.'
         tests = [
-            "",  # No frontmatter
-            "blah",  # No frontmatter
-            "---A\n---\n",
-            "---\n---A\n",
-            "a\n---\n---\n",  # Delimiters must be first
-            "  \n  \ta\n---\n---\n",  # Delimiters must be first
+            ("", missing_delimiter_lines_msg),
+            ("blah", missing_delimiter_lines_msg),
+            ("---A\n---\n", missing_delimiter_lines_msg),
+            ("---\n---A\n", missing_delimiter_lines_msg),
+            ("a\n---\n---\n", delimiter_not_first_msg),
+            ("  \n  \ta\n---\n---\n", delimiter_not_first_msg),
         ]
-        for test in tests:
-            with self.subTest(md=test):
-                self.write_file("content/index.md", test)  # No delimiters
-                with self.assertRaises(clearice.exceptions.FrontmatterError):
-                    self.generate()
+        for md, failure_regex in tests:
+            with self.subTest(md=md):
+                self.write_file("content/index.md", md)  # No delimiters
+                self.assertGenerateRaises(
+                    clearice.exceptions.FrontmatterError,
+                    failure_regex
+                )
 
     def test_frontmatter_parse_empty(self):
         #  Empty frontmatter yaml gives empty frontmatter dict
@@ -71,14 +79,17 @@ class TestApp(BaseTest):
     def test_frontmatter_parse_errors(self):
         self.write_file("templates/default.html", "{{ context.frontmatter | safe }}")
         tests = [
-            "-item1\n-item2",
-            "-",
+            ("-item1\n-item2",  "Frontmatter must be a YAML mapping"),
+            ("-",               "Frontmatter must be a YAML mapping"),
+            ("foo: bar\n- baz", "while parsing a block mapping"),
         ]
-        for fm in tests:
+        for fm, failure_regex in tests:
             with self.subTest(frontmatter=fm):
                 self.write_file("content/index.md", "---\n{}\n---\n".format(fm))
-                with self.assertRaises(clearice.exceptions.FrontmatterError):
-                    self.generate()
+                self.assertGenerateRaises(
+                    clearice.exceptions.FrontmatterError,
+                    failure_regex
+                )
 
     def test_ignored_files(self):
         self.write_file("templates/default.html", "{{ content }}")
@@ -105,14 +116,18 @@ class TestApp(BaseTest):
 
     def test_template_not_found(self):
         self.write_file("content/index.md", "---\ntemplate: nonexistant.html\n---")
-        with self.assertRaises(clearice.exceptions.TemplateNotFound):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.TemplateNotFound,
+            '^Template not found: "nonexistant.html"$'
+        )
 
     def test_template_parse_error(self):
         self.write_file("templates/default.html", "{% }}")
         self.write_file("content/index.md", "---\n---")
-        with self.assertRaises(clearice.exceptions.TemplateError):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.TemplateError,
+            "unexpected '}'"
+        )
 
     def test_template_var_not_found(self):
 
@@ -124,8 +139,10 @@ class TestApp(BaseTest):
 
         # ...but errors when testing attributes
         self.write_file("templates/default.html", "{{ blah.foo }}")
-        with self.assertRaises(clearice.exceptions.TemplateError):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.TemplateError,
+            "'blah' is undefined"
+        )
 
     def test_filename_date_and_name(self):
         self.write_file("content/blog/_collection.yaml", "")
@@ -161,8 +178,10 @@ class TestApp(BaseTest):
         self.write_file("templates/default.html",
                 "{{ date }}, {{ date.day }}, {{ slug }}")
         self.write_file("content/blog/post.md", '---\ndate: 2000-01-38\n---')
-        with self.assertRaises(clearice.exceptions.FrontmatterError):
-            self.generate()
+        self.assertGenerateRaises(
+            clearice.exceptions.FrontmatterError,
+            "day is out of range for month"
+        )
 
         # Date in frontmatter as string is fine
         self.write_file("templates/default.html",
@@ -171,3 +190,42 @@ class TestApp(BaseTest):
         self.generate()
         self.assertFileContents("build/blog/post/index.html",
                 "2000-01-38, post")
+
+    def test_relative_root_dir1(self):
+        self.write_file("templates/default.html", "{{ content }}")
+        self.write_file("content/index.md", "---\n---\nHello!")
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(self.tmp_dir)
+            self.generate(root_path="./")
+        finally:
+            os.chdir(original_cwd)
+
+        self.assertFileContents("build/index.html", "Hello!")
+
+    def test_relative_root_dir2(self):
+        self.write_file("templates/default.html", "{{ content }}")
+        self.write_file("content/index.md", "---\n---\nHello!")
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(os.path.join(self.tmp_dir, "templates"))
+            self.generate(root_path="../")
+        finally:
+            os.chdir(original_cwd)
+
+        self.assertFileContents("build/index.html", "Hello!")
+
+    def test_relative_root_dir3(self):
+        self.write_file("subdir/templates/default.html", "{{ content }}")
+        self.write_file("subdir/content/index.md", "---\n---\nHello!")
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(self.tmp_dir)
+            self.generate(root_path="subdir")
+        finally:
+            os.chdir(original_cwd)
+
+        self.assertFileContents("subdir/build/index.html", "Hello!")

@@ -16,11 +16,10 @@ def extract_info_from_filename(fname):
     info = {}
 
     # Extract date
-    date, fname = str_to_date(fname)
-    if date:
+    date, new_fname = str_to_date(fname)
+    if date and new_fname[0] == '_':  # Require '_' separating date and slug
         info['date'] = date
-        if fname[0] == '_':  # Common to have "date_slug.md". Remove the '_'
-            fname = fname[1:]
+        fname = new_fname[1:]
 
     #TODO: Slugify
     info['slug'] = fname
@@ -68,7 +67,7 @@ def read_frontmatter_file(filename):
 
     try:
         fm = yaml.load(''.join(yaml_lines))
-    except ValueError as e:
+    except (ValueError, yaml.parser.ParserError) as e:
         raise FrontmatterError(filename, e)
     if fm is None:
         fm = {}
@@ -132,7 +131,7 @@ class TemplateView(View):
 
     def __call__(self):
         if not self.url:
-            raise RuntimeError("Programmer error: url should have been set")
+            raise RuntimeError("Programmer error: url should have been set")  # pragma: nocover
         template = self.context["template"]
         try:
             return render_template(template, **self.context)
