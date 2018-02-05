@@ -2,6 +2,7 @@
 import os
 import unittest
 import tempfile
+import shutil
 
 import clearice
 
@@ -69,3 +70,4 @@ class BaseTest(unittest.TestCase):
     def tearDown(self):
         if self.tmp_dir:
             self.assertNoLooseFiles()
+            shutil.rmtree(self.tmp_dir)
