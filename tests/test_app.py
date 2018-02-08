@@ -82,6 +82,7 @@ class TestApp(BaseTest):
             ("-item1\n-item2",  "Frontmatter must be a YAML mapping"),
             ("-",               "Frontmatter must be a YAML mapping"),
             ("foo: bar\n- baz", "while parsing a block mapping"),
+            ("foo: bar\nbaz: 3\nthis:that\n", "could not find expected ':'"),  # YAML parsing is odd, spaces matter
         ]
         for fm, failure_regex in tests:
             with self.subTest(frontmatter=fm):

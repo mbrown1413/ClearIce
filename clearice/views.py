@@ -67,14 +67,14 @@ def read_frontmatter_file(filename):
 
     try:
         fm = yaml.load(''.join(yaml_lines))
-    except (ValueError, yaml.parser.ParserError) as e:
-        raise FrontmatterError(filename, e)
+    except (ValueError, yaml.error.YAMLError) as e:
+        raise FrontmatterError(filename, e) from None
     if fm is None:
         fm = {}
 
     if type(fm) != dict:
-        raise FrontmatterError(filename, 'Frontmatter must be a YAML mapping') \
-                from None
+        raise FrontmatterError(filename, 'Frontmatter must be a YAML mapping, '
+                'not "{}"'.format(type(fm))) from None
 
     content = ''.join(lines[fm_end+1:])
     return fm, content
