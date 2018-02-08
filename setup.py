@@ -33,6 +33,7 @@ setup(
         "Frozen-Flask",
         "pyyaml",
         "markdown",
+        "click",
     ],
     entry_points={
         "console_scripts": [
