@@ -44,6 +44,9 @@ class BaseTest(unittest.TestCase):
         content = self.read_file(path)
         self.assertEqual(content, expected_contents)
 
+    def assertFileNotExists(self, path):
+        self.assertFalse(os.path.exists(os.path.join(self.tmp_dir, path)))
+
     def assertNoLooseFiles(self):
         self.assertIsNotNone(self.tmp_dir)
         for dirpath, dirnames, filenames in os.walk(self.tmp_dir):

@@ -239,3 +239,34 @@ class TestApp(BaseTest):
         self.generate()
         self.assertFileContents("build/index.html",
                 "escape &lt;br&gt; me\nshould be &amp; escaped")
+
+    def test_extra_files_removed(self):
+        """Extra files and dirs in the build directory should be removed."""
+        self.write_file("templates/default.html", "")
+        self.write_file("content/index.md", "---\n---")
+        self.write_file("content/page.md", "---\n---")
+        self.write_file("content/blog/entry1.md", "---\n---")
+        self.write_file("content/blog/entry1/subcontent.md", "---\n---")
+        self.write_file("content/blog/entry2.md", "---\n---")
+        self.write_file("content/deep/in/the/tree.md", "---\n---")
+
+        self.generate()
+        self.assertFileContents("build/index.html", "")
+        self.assertFileContents("build/page/index.html", "")
+        self.assertFileContents("build/blog/entry1/index.html", "")
+        self.assertFileContents("build/blog/entry1/subcontent/index.html", "")
+        self.assertFileContents("build/blog/entry2/index.html", "")
+        self.assertFileContents("build/deep/in/the/tree/index.html", "")
+
+        os.remove(os.path.join(self.tmp_dir, "content/page.md"))
+        os.remove(os.path.join(self.tmp_dir, "content/blog/entry1.md"))
+        os.remove(os.path.join(self.tmp_dir, "content/deep/in/the/tree.md"))
+        self.generate()
+
+        self.assertFileNotExists("build/page/")
+        self.assertFileNotExists("build/blog/entry1/index.html")
+        self.assertFileNotExists("build/deep/")
+
+        self.assertFileContents("build/index.html", "")
+        self.assertFileContents("build/blog/entry1/subcontent/index.html", "")
+        self.assertFileContents("build/blog/entry2/index.html", "")
