@@ -230,3 +230,12 @@ class TestApp(BaseTest):
             os.chdir(original_cwd)
 
         self.assertFileContents("subdir/build/index.html", "Hello!")
+
+    def test_autoescape(self):
+        self.write_file("templates/default.html",
+                "{{ foo }}\n{{ content }}")
+        self.write_file("content/index.md",
+                "---\nfoo: escape <br> me\n---\nshould be & escaped")
+        self.generate()
+        self.assertFileContents("build/index.html",
+                "escape &lt;br&gt; me\nshould be &amp; escaped")

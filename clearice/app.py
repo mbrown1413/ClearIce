@@ -40,7 +40,8 @@ class App():
 
     def make_jinja_environment(self):
         return jinja2.Environment(
-            loader=jinja2.FileSystemLoader(self.template_dir)
+            loader=jinja2.FileSystemLoader(self.template_dir),
+            autoescape=True,
         )
 
     def render_template(self, template_name_or_list, context):
