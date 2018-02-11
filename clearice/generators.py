@@ -5,7 +5,7 @@ from jinja2 import Template
 import jinja2.exceptions
 
 from .helpers import walk_dir, normalize_url, remove_prefix, remove_extension
-from .exceptions import ConfigError, YamlError
+from .exceptions import ConfigError, YamlError, UrlConflictError
 from . import views
 
 MARKDOWN_EXTENSIONS = [".md", ".markdown"]
@@ -18,7 +18,7 @@ class GeneratorBase():
     Generators can be any callable that receives the app and modifies it. The
     main things that generators do are:
 
-      - Add urls using `app.add_url_rule()`.
+      - Add urls using `app.add_url()`.
       - Consume files by calling `app.consume()`.
 
     A simple generator might walk the contents directory, `app.content_dir`,
@@ -32,7 +32,7 @@ class GeneratorBase():
 
     def __call__(self, app):
         """
-        Produces content using `app.add_url_rule()` and consumes files in the
+        Produces content using `app.add_url()` and consumes files in the
         contents directory using `app.consume()`.
         """
         raise NotImplementedError()  # pragma: no cover
@@ -47,7 +47,7 @@ class MarkdownGenerator(GeneratorBase):
         for abspath, relpath, filename in files:
             url = normalize_url(remove_extension(relpath))
             view = views.MarkdownView(abspath, app, url)
-            app.add_url_rule(url, url, view)
+            app.add_url(url, view)
             app.consume(abspath)
 
 class Collection(GeneratorBase):
@@ -96,7 +96,7 @@ class Collection(GeneratorBase):
 
                 self.items.append(view)
                 app.consume(abspath)
-                app.add_url_rule(url, url, view)
+                app.add_url(url, view)
 
         # Sort items
         if self.item_order:
@@ -205,12 +205,8 @@ class Collection(GeneratorBase):
             view = views.TemplateView(self.app, url, template, self, context=context)
 
         try:
-            self.app.add_url_rule(url, url, view)
-        except AssertionError as e:
-            if str(e).startswith("View function mapping is overwriting an "
-                                 "existing endpoint function:"):
-                raise ConfigError(self.yaml_path, 'Page title "{}" with url '
-                        '"{}" conflicts with an existing url.'.format(
-                        title, url))
-            else:
-                raise  # pragma: no cover
+            self.app.add_url(url, view)
+        except UrlConflictError:
+            raise ConfigError(self.yaml_path, 'Page title "{}" with url '
+                    '"{}" conflicts with an existing url.'.format(
+                    title, url))

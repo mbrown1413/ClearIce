@@ -23,6 +23,8 @@ class ConfigError(ClearIceException):
         else:
             return 'Configuration error: {}'.format(self.msg)
 
+class UrlConflictError(ClearIceException): pass
+
 class TemplateError(ClearIceException): pass
 
 class TemplateNotFound(TemplateError):

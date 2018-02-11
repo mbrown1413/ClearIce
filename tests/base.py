@@ -61,8 +61,8 @@ class BaseTest(unittest.TestCase):
             self.generate()
 
     def generate(self, **kwargs):
-        if "root_path" not in kwargs:
-            kwargs["root_path"] = self.tmp_dir
+        if "root_dir" not in kwargs:
+            kwargs["root_dir"] = self.tmp_dir
         self.app = clearice.app.App(**kwargs)
         self.app.generate()
         return self.app

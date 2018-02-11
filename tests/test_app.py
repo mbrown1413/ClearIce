@@ -109,7 +109,7 @@ class TestApp(BaseTest):
 
         lines = self.read_file("build/pagename/index.html").split('\n')
         self.assertEqual(lines[0], "/pagename/")
-        self.assertTrue(lines[1].startswith("<App"))
+        self.assertTrue(lines[1].startswith("<clearice.app.App"))
         self.assertEqual(lines[2], "default.html")
         self.assertEqual(lines[3][0], "{")
         self.assertEqual(lines[3][-1], "}")
@@ -199,7 +199,7 @@ class TestApp(BaseTest):
         original_cwd = os.getcwd()
         try:
             os.chdir(self.tmp_dir)
-            self.generate(root_path="./")
+            self.generate(root_dir="./")
         finally:
             os.chdir(original_cwd)
 
@@ -212,7 +212,7 @@ class TestApp(BaseTest):
         original_cwd = os.getcwd()
         try:
             os.chdir(os.path.join(self.tmp_dir, "templates"))
-            self.generate(root_path="../")
+            self.generate(root_dir="../")
         finally:
             os.chdir(original_cwd)
 
@@ -225,7 +225,7 @@ class TestApp(BaseTest):
         original_cwd = os.getcwd()
         try:
             os.chdir(self.tmp_dir)
-            self.generate(root_path="subdir")
+            self.generate(root_dir="subdir")
         finally:
             os.chdir(original_cwd)
 

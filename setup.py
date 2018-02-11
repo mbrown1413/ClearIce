@@ -36,8 +36,6 @@ setup(
     packages=["clearice"],
     license="LICENSE.txt",
     install_requires=[
-        "Flask",
-        "Frozen-Flask",
         "pyyaml",
         "markdown",
         "click",

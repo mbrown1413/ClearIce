@@ -2,7 +2,6 @@ import os
 
 from datetime import datetime
 
-from flask import render_template
 import yaml
 import jinja2.exceptions
 
@@ -134,7 +133,7 @@ class TemplateView(View):
             raise RuntimeError("Programmer error: url should have been set")  # pragma: nocover
         template = self.context["template"]
         try:
-            return render_template(template, **self.context)
+            return self.app.render_template(template, self.context)
         except jinja2.exceptions.TemplateNotFound as e:
             #TODO: Clarify where the user provided this template, so they can
             #      go fix the problem! Maybe a more detailed description if

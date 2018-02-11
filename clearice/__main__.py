@@ -17,10 +17,10 @@ def _main():
         n_generated = 0
         app.generate_urls()
         prog = progressbar(
-            app.render_content(),
+            app.build_content(),
             length=app.n_urls,
             label="Rendering Pages",
-            item_show_func=lambda page: page.url if page else "",
+            item_show_func=lambda page: page,
         )
         with prog as urls:
             for url in urls:

@@ -1,35 +1,31 @@
 import os
 
-from flask import Flask, Markup
-from flask_frozen import Freezer
 from markdown import Markdown
+import jinja2
 
 from .helpers import walk_dir, normalize_url, remove_suffix
-from .exceptions import ConfigError
+from .exceptions import ConfigError, UrlConflictError
 from . import generators
 
-class App(Flask):
+class App():
 
-    def __init__(self, root_path=None, print_progress=False, *args, **kwargs):
-        if root_path is None: root_path = os.getcwd()
+    def __init__(self, root_dir=None, print_progress=False):
+        self.root_dir = os.path.abspath(root_dir) if root_dir else os.getcwd()
         self.print_progress = print_progress
 
-        self.n_urls = 0
-        super().__init__("clearice", *args, root_path=root_path, **kwargs)
+        self.content_dir = os.path.join(self.root_dir, "content")
+        self.build_dir = os.path.join(self.root_dir, "build")
+        self.template_dir = os.path.join(self.root_dir, "templates")
 
-        # Normally, exceptions that occur when a url is requested are caught by
-        # flask and a 500 status is returned. This causes the exception to be
-        # propogated instead. See `flask.Flask.test_client()`.
-        self.testing = True
-
-        self.content_dir = os.path.join(self.root_path, "content")
+        self.jinja_env = self.make_jinja_environment()
         self.consumed_files = set()
         self._generators = []
         self.collections = _Collections(self)
+        self.url_map = {}  # Maps URLs to Views
 
         # Markdown Template Filter
         md_parser = Markdown()
-        md_convert = lambda text: Markup(md_parser.reset().convert(text))
+        md_convert = lambda text: jinja2.Markup(md_parser.reset().convert(text))
         self.add_template_filter(md_convert, "markdown")
 
         # Adding `Collection` generator for each _collection.yaml file
@@ -42,9 +38,29 @@ class App(Flask):
         # Add template markdown generator
         self.add_generator(generators.MarkdownGenerator())
 
-    def add_url_rule(self, rule, endpoint=None, view_func=None, **options):
-        super().add_url_rule(rule, endpoint, view_func, **options)
-        self.n_urls += 1
+    def make_jinja_environment(self):
+        return jinja2.Environment(
+            loader=jinja2.FileSystemLoader(self.template_dir)
+        )
+
+    def render_template(self, template_name_or_list, context):
+        t = self.jinja_env.get_or_select_template(template_name_or_list)
+        return t.render(context)
+
+    @property
+    def n_urls(self):
+        return len(self.url_map)
+
+    def add_template_filter(self, func, name):
+        #TODO: Enable use as decorator, like flask
+        self.jinja_env.filters[name] = func
+
+    def add_url(self, url, view):
+        #TODO: Add name for reverse lookup
+        #TODO: Option to not care about overwriting url
+        if url in self.url_map:
+            raise UrlConflictError
+        self.url_map[url] = view
 
     def consume(self, abspath):
         assert os.path.isabs(abspath)
@@ -72,63 +88,59 @@ class App(Flask):
         for generator in self._generators:
             generator(self)
         if self.print_progress:
-            print()
+            print()  # Newline after printing in consume()
 
-        # Used to optimize URL matching (see "Optimization hack" below)
-        self.fast_map = {}
-        for rule in self.url_map.iter_rules():
-            self.fast_map[rule.endpoint] = rule
+    def build_content(self):
+        """Yield pages as they are rendered into the build directory."""
 
-    def render_content(self):
-        """Yield pages as they are rendered."""
-        freezer = Freezer(self)
-        yield from freezer.freeze_yield()
+        # Create build dir
+        if not os.path.isdir(self.build_dir):
+            os.makedirs(self.build_dir)
+
+        # Record existing files in build dir
+        existing_files = set()
+        for abspath, relpath, filename in walk_dir(self.build_dir):
+            existing_files.add(abspath)
+
+        # Render all urls
+        written_files = set()
+        for url, view_func in self.url_map.items():
+            filename = self._build_url(url, view_func)
+            written_files.add(filename)
+            yield url
+
+        # Remove files that existed before
+        for filename in existing_files - written_files:
+            os.remove(filename)
+            parent = os.path.dirname(filename)
+            if not os.listdir(parent):
+                os.removedirs(parent)
+
+    def _build_url(self, url, view_func):
+
+        assert url[0] == '/'
+        url = url[1:]  # Remove leading '/'
+        if len(url) == 0 or url[-1] == '/':  # Add index.html filename if needed
+            url = url+'index.html'
+        filename = os.path.join(self.build_dir, url)
+
+        # Make directories
+        dirname = os.path.dirname(filename)
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
+
+        # Write File
+        content = view_func()
+        with open(filename, 'w') as f:
+            f.write(content)
+
+        return filename
 
     def generate(self):
         """The main no-frills entry point to generate content."""
         self.generate_urls()
-        for url in self.render_content():
+        for url in self.build_content():
             pass
-
-    # Optimization hack:
-    #
-    # The URL resolution system of werkzeug is way more complicated than we
-    # need. We always have a simple one-to-one mapping of urls to rules, so
-    # werkzeug's method of going through each rule one by one is very
-    # inefficient when there are many URLs.
-    #
-    # Instead, we build a mapping of endpoints to rules (`self.fast_map`) and
-    # search that first to find the rule. If a mapping is found,
-    # `create_url_adapter` returns a simple adapter that always returns the
-    # found rule.
-    def create_url_adapter(self, request):
-        normal_adapter = super().create_url_adapter(request)
-        if request is not None and self.fast_map:
-            rule = self.fast_map.get(request.path, None)
-            if rule:
-                return _Adapter(normal_adapter, rule)
-        return normal_adapter
-
-class _Adapter():
-    """
-    A URL mapping adapter (like `werkzeug.routing.MapAdapter`) which always
-    returns the given rule, or falls back to the given adapter if it doesn't
-    know how to handle things.
-    """
-
-    def __init__(self, normal_adapter, rule):
-        self.normal_adapter = normal_adapter
-        self.rule = rule
-
-    def match(self, path_info=None, method=None, return_rule=False,
-              query_args=None):
-        if return_rule:
-            return self.rule, {}
-        else:
-            raise AssertionError()  # pragma: nocover
-
-    def build(self, *args, **kwargs):
-        return self.normal_adapter.build(*args, **kwargs)
 
 class _Collections():
     """Passthrough object for handy access in templates."""
