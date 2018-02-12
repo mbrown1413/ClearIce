@@ -9,7 +9,7 @@ from . import generators
 
 class App():
 
-    def __init__(self, root_dir=None, print_progress=False):
+    def __init__(self, root_dir=None, print_progress=False, skip_default_generators=False):
         self.root_dir = os.path.abspath(root_dir) if root_dir else os.getcwd()
         self.print_progress = print_progress
 
@@ -27,6 +27,11 @@ class App():
         md_parser = Markdown()
         md_convert = lambda text: jinja2.Markup(md_parser.reset().convert(text))
         self.add_template_filter(md_convert, "markdown")
+
+        if not skip_default_generators:
+            self.add_default_generators()
+
+    def add_default_generators(self):
 
         # Adding `Collection` generator for each _collection.yaml file
         for abspath, relpath, filename in walk_dir(self.content_dir):

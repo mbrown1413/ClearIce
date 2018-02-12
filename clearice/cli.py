@@ -6,15 +6,16 @@ from click import progressbar
 from .app import App
 from .exceptions import ClearIceException
 
-def _main():
+def _main(app=None):
     quiet = False
-    app = App(print_progress=not quiet)
+
+    if not app:
+        app = App()
+    app.print_progress = not quiet
 
     if quiet:
         app.generate()
-
     else:
-        n_generated = 0
         app.generate_urls()
         prog = progressbar(
             app.build_content(),
@@ -24,12 +25,12 @@ def _main():
         )
         with prog as urls:
             for url in urls:
-                n_generated += 1
-        print("Generated {} pages".format(n_generated))
+                pass
+        print("Generated {} pages".format(app.n_urls))
 
-def main():
+def main(*args, **kwargs):
     try:
-        _main()
+        _main(*args, **kwargs)
     except ClearIceException as e:
         sys.stderr.write(str(e)+'\n')
         sys.exit(-1)

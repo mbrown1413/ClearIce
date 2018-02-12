@@ -42,7 +42,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "clearice=clearice.__main__:main",
+            "clearice=clearice.cli:main",
         ],
     },
 )
