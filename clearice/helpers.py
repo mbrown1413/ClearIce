@@ -52,15 +52,16 @@ def fnmatch_one_of(filename, patterns):
             return True
     return False
 
-def walk_dir(root, exclude=(), subdir="", fname_patterns=None):
+def walk_dir(root, subdir="", patterns=None):
     """Recursively lists all files the root directory.
 
     Args:
         root: The directory to walk.
-        exclude: Ignore files with an absolute path in this collection.
         subdir: If not `None`, only return files the directory "root/subdir/".
-        fname_patterns: A list of glob-style filename strings. If given, only
-            filenames that match one of these patterns will be returned.
+            Relative paths will still be relative to `root`.
+        patterns: A list of glob-style filename strings. If given, only
+            filenames that match one of these patterns will be returned. Also
+            accepts a single string as a shortcut for a 1-item list.
 
     Returns: [(abspath, relpath, filename), ...]
         abspath: Absolute path of file, via `os.path.abspath()`.
@@ -68,17 +69,17 @@ def walk_dir(root, exclude=(), subdir="", fname_patterns=None):
         filename: Name of the file.
     """
     root = os.path.abspath(root)
+    if isinstance(patterns, str):
+        patterns = [patterns]
     assert subdir is None or not subdir.startswith('/')
     for dirpath, dirnames, filenames in os.walk(os.path.join(root, subdir)):
         for filename in filenames:
 
             if fnmatch_one_of(filename, IGNORED_FILES):
                 continue
-            if fname_patterns and not fnmatch_one_of(filename, fname_patterns):
+            if patterns and not fnmatch_one_of(filename, patterns):
                 continue
 
             abspath = os.path.join(dirpath, filename)
             relpath = remove_prefix(abspath, root)
-            if abspath in exclude:
-                continue
-            yield abspath, relpath, filename
+            yield abspath, relpath

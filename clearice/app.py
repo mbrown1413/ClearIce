@@ -32,15 +32,14 @@ class App():
             self.add_default_generators()
 
     def add_default_generators(self):
+        COLLECTION_CONF = "_collection.yaml"
+        # Collection generator for each _collection.yaml file
+        for abspath, relpath in self.walk_content(patterns=COLLECTION_CONF):
+            url = normalize_url(remove_suffix(relpath, COLLECTION_CONF))
+            generator = generators.Collection(url, abspath)
+            self.add_generator(generator)
 
-        # Adding `Collection` generator for each _collection.yaml file
-        for abspath, relpath, filename in walk_dir(self.content_dir):
-            if filename == "_collection.yaml":
-                url = normalize_url(remove_suffix(relpath, "_collection.yaml"))
-                generator = generators.Collection(url, abspath)
-                self.add_generator(generator)
-
-        # Add template markdown generator
+        # Markdown page generator
         self.add_generator(generators.MarkdownGenerator())
 
     def make_jinja_environment(self):
@@ -56,6 +55,15 @@ class App():
     def render_template_string(self, source, context):
         t = self.jinja_env.from_string(source)
         return t.render(context)
+
+    def walk_content(self, include_consumed=False, **kwargs):
+        files = walk_dir(
+            root=self.content_dir,
+            **kwargs,
+        )
+        for abspath, relpath in files:
+            if include_consumed or not self.is_consumed(abspath):
+                yield abspath, relpath
 
     @property
     def n_urls(self):
@@ -80,6 +88,7 @@ class App():
             print("\rProcessed {} files".format(len(self.consumed_files)), end="")  # pragma: nocover
 
     def is_consumed(self, abspath):
+        assert os.path.isabs(abspath)
         return abspath in self.consumed_files
 
     def add_generator(self, gen):
@@ -109,7 +118,7 @@ class App():
 
         # Record existing files in build dir
         existing_files = set()
-        for abspath, relpath, filename in walk_dir(self.build_dir):
+        for abspath, relpath in walk_dir(self.build_dir):
             existing_files.add(abspath)
 
         # Render all urls

@@ -1,4 +1,6 @@
 
+import os.path
+
 import clearice
 
 from .base import BaseTest
@@ -180,7 +182,9 @@ class TestCollection(BaseTest):
 
         # We don't copy over unknown files. In the future, specific unhandled
         # data file extensions will be copied though.
-        self.assertFalse(self.app.is_consumed("blog/blah.yaml"))
+        self.assertFalse(
+            self.app.is_consumed(os.path.join(self.tmp_dir, "build/blog/blah.yaml"))
+        )
 
     def test_blank_yaml(self):
         self.write_file("content/blog/_collection.yaml", "")

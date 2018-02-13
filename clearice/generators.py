@@ -4,7 +4,7 @@ import yaml
 from jinja2 import Template
 import jinja2.exceptions
 
-from .helpers import walk_dir, normalize_url, remove_prefix, remove_extension
+from .helpers import normalize_url, remove_prefix, remove_extension
 from .exceptions import ConfigError, YamlError, UrlConflictError
 from . import views
 
@@ -41,10 +41,8 @@ class MarkdownGenerator(GeneratorBase):
     """Adds a `MarkdownView` url for every markdown file."""
 
     def __call__(self, app):
-        files = walk_dir(app.content_dir,
-                         exclude=app.consumed_files,
-                         fname_patterns=MARKDOWN_FILES)
-        for abspath, relpath, filename in files:
+        files = app.walk_content(patterns=MARKDOWN_FILES)
+        for abspath, relpath in files:
             url = normalize_url(remove_extension(relpath))
             view = views.MarkdownView(abspath, app, url)
             app.add_url(url, view)
@@ -88,10 +86,14 @@ class Collection(GeneratorBase):
             self.register_page(page)
 
         # Find and collect items
-        for abspath, relpath, filename in self.get_item_files(app):
-            if self.file_is_item(app, abspath, relpath, filename):
+        files = app.walk_content(
+            subdir=remove_prefix(self.url, '/'),
+            patterns=MARKDOWN_FILES
+        )
+        for abspath, relpath in files:
+            if self.file_is_item(app, abspath, relpath):
                 view = views.MarkdownView(abspath, app, collection=self)
-                url = self.file_to_url(app, view, abspath, relpath, filename)
+                url = self.file_to_url(app, view, abspath, relpath)
                 view.set_url(url)
 
                 self.items.append(view)
@@ -105,13 +107,7 @@ class Collection(GeneratorBase):
                 return str(value).lower()
             self.items = list(sorted(self.items, key=sortfunc))
 
-    def get_item_files(self, app):
-        return walk_dir(app.content_dir,
-                        exclude=app.consumed_files,
-                        subdir=remove_prefix(self.url, '/'),
-                        fname_patterns=MARKDOWN_FILES)
-
-    def file_is_item(self, app, abspath, relpath, filename):
+    def file_is_item(self, app, abspath, relpath):
         # If `self.url` is in "/blog/", then "/blog/foo.md" and
         # "/blog/bar/index.md" will be considered items.
 
@@ -122,7 +118,7 @@ class Collection(GeneratorBase):
         last_slash = url.rindex('/')
         return url[:last_slash+1] == self.url
 
-    def file_to_url(self, app, view, abspath, relpath, filename):
+    def file_to_url(self, app, view, abspath, relpath):
         if self.url_format:
             try:
                 template = Template(self.url_format)
