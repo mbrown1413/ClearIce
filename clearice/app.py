@@ -53,6 +53,10 @@ class App():
         t = self.jinja_env.get_or_select_template(template_name_or_list)
         return t.render(context)
 
+    def render_template_string(self, source, context):
+        t = self.jinja_env.from_string(source)
+        return t.render(context)
+
     @property
     def n_urls(self):
         return len(self.url_map)

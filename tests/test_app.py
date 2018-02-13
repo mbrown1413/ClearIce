@@ -20,7 +20,6 @@ class TestApp(BaseTest):
         self.assertFileContents("build/subdir/index.html", "subdir index")
 
     def test_mankdown_simple(self):
-        self.write_file("templates/default.html", "{{ content | markdown }}")
         self.write_file("content/index.md", "---\n---\nHello!\n_i_**b**")
         self.generate()
         self.assertFileContents("build/index.html", "<p>Hello!\n<em>i</em><strong>b</strong></p>")

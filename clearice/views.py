@@ -135,6 +135,8 @@ class TemplateView(View):
         try:
             return self.app.render_template(template, self.context)
         except jinja2.exceptions.TemplateNotFound as e:
+            if template == "default.html":
+                return self.app.render_template_string("{{ content | markdown }}", self.context)
             #TODO: Clarify where the user provided this template, so they can
             #      go fix the problem! Maybe a more detailed description if
             #      it's "default.html" that's missing.
