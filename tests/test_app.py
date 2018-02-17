@@ -269,3 +269,32 @@ class TestApp(BaseTest):
         self.assertFileContents("build/index.html", "")
         self.assertFileContents("build/blog/entry1/subcontent/index.html", "")
         self.assertFileContents("build/blog/entry2/index.html", "")
+
+    def test_action_handling(self):
+        self.write_file("content/file1", "file1 content")
+
+        self.make_app()
+
+        # Every combination of
+        #   - string
+        #   - action
+        #   - callable returning one of the above
+        self.app.add_url("/textfile.txt", clearice.buildactions.File("Just a text file"))
+        self.app.add_url("/textfile2.txt", lambda: clearice.buildactions.File("Just text file 2"))
+        self.app.add_url("/html_file", "html file")
+        self.app.add_url("/html_file2", lambda: "html file 2")
+
+        self.generate()
+
+        self.assertFileContents("build/textfile.txt", "Just a text file")
+        self.assertFileContents("build/textfile2.txt", "Just text file 2")
+        self.assertFileContents("build/html_file/index.html", "html file")
+        self.assertFileContents("build/html_file2/index.html", "html file 2")
+
+    def test_bad_action(self):
+        self.write_file("content/file1", "file1 content")
+
+        self.make_app()
+        self.app.add_url("/textfile.txt", object())
+        with self.assertRaisesRegex(RuntimeError, "Could not resolve action from view."):
+            self.generate()

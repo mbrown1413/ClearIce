@@ -5,30 +5,36 @@ import jinja2
 
 from .helpers import walk_dir, normalize_url, remove_suffix
 from .exceptions import ConfigError, UrlConflictError
-from . import generators
+from . import generators, buildactions
 
 class App():
 
     def __init__(self, root_dir=None, print_progress=False, skip_default_generators=False):
         self.root_dir = os.path.abspath(root_dir) if root_dir else os.getcwd()
         self.print_progress = print_progress
+        self.skip_default_generators = skip_default_generators
 
         self.content_dir = os.path.join(self.root_dir, "content")
         self.build_dir = os.path.join(self.root_dir, "build")
         self.template_dir = os.path.join(self.root_dir, "templates")
 
+        self.reset()
+
+    def reset(self):
         self.jinja_env = self.make_jinja_environment()
         self.consumed_files = set()
         self._generators = []
         self.collections = _Collections(self)
         self.url_map = {}  # Maps URLs to Views
+        self.has_generated_urls = False
+        self.has_built = False
 
         # Markdown Template Filter
         md_parser = Markdown()
         md_convert = lambda text: jinja2.Markup(md_parser.reset().convert(text))
         self.add_template_filter(md_convert, "markdown")
 
-        if not skip_default_generators:
+        if not self.skip_default_generators:
             self.add_default_generators()
 
     def add_default_generators(self):
@@ -104,6 +110,10 @@ class App():
 
     def generate_urls(self):
         """Reads content files and metadata by running all generators."""
+        if self.has_generated_urls:
+            raise RuntimeError("reset() must be called before calling generate_urls() a second time")
+        self.has_generated_urls = True
+
         for generator in self._generators:
             generator(self)
         if self.print_progress:
@@ -111,6 +121,9 @@ class App():
 
     def build_content(self):
         """Yield pages as they are rendered into the build directory."""
+        if self.has_built:
+            raise RuntimeError("reset() must be called before calling build_content() a second time")
+        self.has_built = True
 
         # Create build dir
         if not os.path.isdir(self.build_dir):
@@ -123,8 +136,8 @@ class App():
 
         # Render all urls
         written_files = set()
-        for url, view_func in self.url_map.items():
-            filename = self._build_url(url, view_func)
+        for url, view in self.url_map.items():
+            filename = self._build_url(url, view)
             written_files.add(filename)
             yield url
 
@@ -135,28 +148,40 @@ class App():
             if not os.listdir(parent):
                 os.removedirs(parent)
 
-    def _build_url(self, url, view_func):
+    def _build_url(self, url, view):
 
+        # Remove leading '/'
         assert url[0] == '/'
-        url = url[1:]  # Remove leading '/'
-        if len(url) == 0 or url[-1] == '/':  # Add index.html filename if needed
-            url = url+'index.html'
-        filename = os.path.join(self.build_dir, url)
+        url = url[1:]
 
-        # Make directories
-        dirname = os.path.dirname(filename)
-        if not os.path.isdir(dirname):
-            os.makedirs(dirname)
+        # A view can be:
+        #   - Instance of `buildactions.BuildAction`
+        #       view.do() is called to perform the action.
+        #   - String
+        #       Acts as if `buildactions.Html(view)` were returned.
+        #   - Any callable
+        #       Calls the view, then acts accordingly like one of the above.
+        if callable(view):
+            view = view()
+        if isinstance(view, buildactions.BuildAction):
+            action = view
+        elif isinstance(view, str):
+            action = buildactions.Html(view)
+        else:
+            raise RuntimeError("Could not resolve action from view.")
 
-        # Write File
-        content = view_func()
-        with open(filename, 'w') as f:
-            f.write(content)
+        out_path = os.path.join(self.build_dir, url)
+        file_written = action.do(self, out_path)
+        if not file_written:
+            file_written = out_path
 
-        return filename
+        return file_written
 
     def generate(self):
         """The main no-frills entry point to generate content."""
+        if self.has_built or self.has_generated_urls:
+            self.reset()
+
         self.generate_urls()
         for url in self.build_content():
             pass

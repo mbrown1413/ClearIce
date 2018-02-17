@@ -63,10 +63,15 @@ class BaseTest(unittest.TestCase):
         with self.assertRaisesRegex(*args, **kwargs):
             self.generate()
 
-    def generate(self, **kwargs):
+    def make_app(self, **kwargs):
         if "root_dir" not in kwargs:
             kwargs["root_dir"] = self.tmp_dir
         self.app = clearice.app.App(**kwargs)
+        return self.app
+
+    def generate(self, **kwargs):
+        if not self.app:
+            self.make_app(**kwargs)
         self.app.generate()
         return self.app
 
