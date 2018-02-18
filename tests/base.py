@@ -63,6 +63,29 @@ class BaseTest(unittest.TestCase):
         with self.assertRaisesRegex(*args, **kwargs):
             self.generate()
 
+    def assertSoftLink(self, path, target, is_relative):
+        path = os.path.abspath(os.path.join(self.tmp_dir, path))
+        target = os.path.abspath(os.path.join(self.tmp_dir, target))
+
+        self.assertTrue(os.path.islink(path))
+        self.assertEqual(os.path.realpath(path), target)
+        real_target = os.readlink(path)
+        if is_relative:
+            self.assertFalse(os.path.isabs(real_target))
+            expected_target = os.path.relpath(target, os.path.dirname(path))
+            self.assertEqual(real_target, expected_target)
+            self.assertEqual(
+                os.path.abspath(os.path.join(os.path.dirname(path), real_target)),
+                os.path.abspath(target)
+            )
+        else:
+            self.assertTrue(os.path.isabs(real_target))
+            self.assertEqual(real_target, target)
+
+    def assertIsHardLink(self, path):
+        st = os.stat(os.path.join(self.tmp_dir, "content/file"))
+        self.assertGreaterEqual(st.st_nlink, 2)
+
     def make_app(self, **kwargs):
         if "root_dir" not in kwargs:
             kwargs["root_dir"] = self.tmp_dir

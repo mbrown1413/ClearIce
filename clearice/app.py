@@ -58,6 +58,20 @@ class App():
         t = self.jinja_env.get_or_select_template(template_name_or_list)
         return t.render(context)
 
+    def get_build_path(self, path):
+        absolute = os.path.abspath(os.path.join(self.build_dir, path))
+        if os.path.isabs(path) or not absolute.startswith(self.build_dir):
+            raise ValueError("Tried to get path {} outside of build directory "
+                    "{}".format(absolute, self.build_dir))
+        return absolute
+
+    def get_content_path(self, path):
+        absolute = os.path.abspath(os.path.join(self.content_dir, path))
+        if os.path.isabs(path) or not absolute.startswith(self.content_dir):
+            raise ValueError("Tried to get path {} outside of content directory "
+                    "{}".format(absolute, self.content_dir))
+        return absolute
+
     def render_template_string(self, source, context):
         t = self.jinja_env.from_string(source)
         return t.render(context)
@@ -170,7 +184,7 @@ class App():
         else:
             raise RuntimeError("Could not resolve action from view.")
 
-        out_path = os.path.join(self.build_dir, url)
+        out_path = self.get_build_path(url)
         file_written = action.do(self, out_path)
         if not file_written:
             file_written = out_path
