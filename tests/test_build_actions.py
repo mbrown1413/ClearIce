@@ -66,3 +66,20 @@ class TestBuildActions(BaseTest):
 
         self.assertFileContents("build/file", "file content")
         self.assertIsHardLink("build/file")
+
+    def test_link_already_exists(self):
+        action = clearice.buildactions.Link("file")
+
+        self.app.add_url("/file", action)
+        self.generate()
+        self.assertFileContents("build/file", "file content")
+        self.assertSoftLink("build/file", "content/file", is_relative=True)
+
+        self.app.reset()
+
+        # Generate a second time. Should not error when file already exists in
+        # buil dir.
+        self.app.add_url("/file", action)
+        self.generate()
+        self.assertFileContents("build/file", "file content")
+        self.assertSoftLink("build/file", "content/file", is_relative=True)

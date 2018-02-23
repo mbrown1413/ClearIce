@@ -63,6 +63,15 @@ class BaseTest(unittest.TestCase):
         with self.assertRaisesRegex(*args, **kwargs):
             self.generate()
 
+    def assertIsNormalFile(self, path):
+        path = os.path.join(self.tmp_dir, path)
+        self.assertTrue(os.path.isfile(path))
+        self.assertFalse(os.path.islink(path))
+
+    def assertIsSoftLink(self, path):
+        path = os.path.abspath(os.path.join(self.tmp_dir, path))
+        self.assertTrue(os.path.islink(path))
+
     def assertSoftLink(self, path, target, is_relative):
         path = os.path.abspath(os.path.join(self.tmp_dir, path))
         target = os.path.abspath(os.path.join(self.tmp_dir, target))
@@ -83,7 +92,7 @@ class BaseTest(unittest.TestCase):
             self.assertEqual(real_target, target)
 
     def assertIsHardLink(self, path):
-        st = os.stat(os.path.join(self.tmp_dir, "content/file"))
+        st = os.stat(os.path.join(self.tmp_dir, path))
         self.assertGreaterEqual(st.st_nlink, 2)
 
     def make_app(self, **kwargs):
@@ -93,7 +102,7 @@ class BaseTest(unittest.TestCase):
         return self.app
 
     def generate(self, **kwargs):
-        if not self.app:
+        if not self.app or self.app.needs_reset:
             self.make_app(**kwargs)
         self.app.generate()
         return self.app

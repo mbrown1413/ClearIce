@@ -67,7 +67,7 @@ class App():
 
     def get_content_path(self, path):
         absolute = os.path.abspath(os.path.join(self.content_dir, path))
-        if os.path.isabs(path) or not absolute.startswith(self.content_dir):
+        if not absolute.startswith(self.content_dir):
             raise ValueError("Tried to get path {} outside of content directory "
                     "{}".format(absolute, self.content_dir))
         return absolute
@@ -191,10 +191,14 @@ class App():
 
         return file_written
 
+    @property
+    def needs_reset(self):
+        return self.has_built or self.has_generated_urls
+
     def generate(self):
         """The main no-frills entry point to generate content."""
-        if self.has_built or self.has_generated_urls:
-            self.reset()
+        if self.needs_reset:
+            raise RuntimeError("reset() must be called before calling generate() a second time")
 
         self.generate_urls()
         for url in self.build_content():

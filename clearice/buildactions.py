@@ -42,6 +42,8 @@ class Copy(BuildAction):
         self.src = src
 
     def do(self, app, dest):
+        if os.path.exists(dest):
+            os.remove(dest)
         self.makedirs(dest)
         shutil.copy(app.get_content_path(self.src), dest)
 
@@ -55,7 +57,10 @@ class Link(BuildAction):
             raise ValueError("Links cannot be both hard and absolute.")
 
     def do(self, app, dest):
+        if os.path.exists(dest):
+            os.remove(dest)
         self.makedirs(dest)
+
         if self.hard:
             os.link(app.get_content_path(self.src), dest)
         elif self.absolute:
