@@ -2,9 +2,10 @@ import os
 
 from markdown import Markdown
 import jinja2
+import yaml
 
 from .helpers import walk_dir, normalize_url, remove_suffix
-from .exceptions import ConfigError, UrlConflictError
+from .exceptions import ConfigError, UrlConflictError, YamlError
 from . import generators, buildactions
 
 class App():
@@ -47,6 +48,25 @@ class App():
 
         # Markdown page generator
         self.add_generator(generators.MarkdownGenerator())
+
+        # For now this is the only function that reads config.yaml, but in the
+        # future this will have to be moved.
+        yaml_path = os.path.join(self.root_dir, 'conf.yaml')
+        if os.path.exists(yaml_path):
+            with open(yaml_path) as f:
+                try:
+                    conf = yaml.load(f)
+                except yaml.error.YAMLError as e:
+                    raise YamlError(yaml_path, e) from None
+        else:
+            conf = {}
+        #TODO: Error on extra conf fields
+
+        # Static File Generator
+        static_conf = conf.pop("static", {}) or {}
+        if static_conf:
+            static_gen = generators.StaticFileGeneraor.from_conf(yaml_path, static_conf)
+            self.add_generator(static_gen)
 
     def make_jinja_environment(self):
         return jinja2.Environment(

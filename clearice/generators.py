@@ -3,10 +3,11 @@ import os
 import yaml
 from jinja2 import Template
 import jinja2.exceptions
+from hfilesize import FileSize
 
 from .helpers import normalize_url, remove_prefix, remove_extension
 from .exceptions import ConfigError, YamlError, UrlConflictError
-from . import views
+from . import views, buildactions
 
 MARKDOWN_EXTENSIONS = [".md", ".markdown"]
 MARKDOWN_FILES = list("*"+ext for ext in MARKDOWN_EXTENSIONS)
@@ -206,3 +207,57 @@ class Collection(GeneratorBase):
             raise ConfigError(self.yaml_path, 'Page title "{}" with url '
                     '"{}" conflicts with an existing url.'.format(
                     title, url))
+
+
+class StaticFileGeneraor(GeneratorBase):
+
+    def __init__(self, patterns=None, link=None, link_above=None, link_type="soft", **kwargs):
+        self.patterns = patterns or []
+        self.link = link_above is not None if link is None else link
+        try:
+            self.link_above = FileSize(link_above or 0, case_sensitive=False)
+        except ValueError:
+            raise ConfigError(None, "Unrecognized file size: {}".format(link_above))
+        self.link_type = link_type
+
+        if not isinstance(self.link, bool):
+            raise ConfigError(None, "static link option must be true or false")
+        if self.link_type not in ("hard", "soft"):
+            raise ConfigError(None, 'Unrecognized link_type "geort", must be "soft" or "hard"')
+        if not isinstance(self.patterns, list) or False in [isinstance(p, str) for p in self.patterns]:
+            raise ConfigError(None, "static patterns must be a list of strings")
+
+        if kwargs:
+            key = list(kwargs.keys())[0]
+            raise ConfigError(None, 'Unexpected field "{}" in static config'.format(key))
+
+    @classmethod
+    def from_conf(cls, yaml_file, data):
+        if not isinstance(data, dict):
+            raise ConfigError(yaml_file, 'Expected static option to be a dict, got "{}"'.format(type(data)))
+        try:
+            return cls(**data)
+        except ConfigError as e:
+            # Re-raise after adding yaml_file info
+            e.filename = yaml_file
+            raise e
+
+    def __call__(self, app):
+        for abspath, relpath in app.walk_content(patterns=self.patterns):
+            app.consume(abspath)
+            url = normalize_url(relpath)
+            action = self.get_action(abspath)
+            app.add_url(url, action)
+
+    def get_action(self, abspath):
+        if self.link:
+            if self.link_above > 0:
+                size = os.path.getsize(abspath)
+            else:
+                size = float('inf')
+            if size > self.link_above:
+                is_hard = self.link_type=='hard'
+                return buildactions.Link(abspath, hard=is_hard)
+
+        # Default to copy
+        return buildactions.Copy(abspath)

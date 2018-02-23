@@ -39,6 +39,7 @@ setup(
         "pyyaml",
         "markdown",
         "click",
+        "hfilesize",
     ],
     entry_points={
         "console_scripts": [
