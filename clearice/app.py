@@ -72,6 +72,7 @@ class App():
         return jinja2.Environment(
             loader=jinja2.FileSystemLoader(self.template_dir),
             autoescape=True,
+            undefined=jinja2.StrictUndefined,
         )
 
     def render_template(self, template_name_or_list, context):

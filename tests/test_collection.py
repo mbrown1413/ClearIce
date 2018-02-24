@@ -170,13 +170,13 @@ class TestCollection(BaseTest):
         self.write_file("content/blog/item2.md",
                 "---\ntitle: Item 2\n---")
         self.write_file("content/blog/item3/index.md", "---\ntitle: Item 3\n---")
-        self.write_file("content/blog/item3/supplimental_content.md", "---\n---")
+        self.write_file("content/blog/item3/supplimental_content.md", "---\ntitle: supplimental\n---")
         self.write_file("content/blog/not_an_item.yaml", "")
         self.generate()
         self.assertFileContents("build/blog/item1/index.html", "Item 1")
         self.assertFileContents("build/blog/item2/index.html", "Item 2")
         self.assertFileContents("build/blog/item3/index.html", "Item 3")
-        self.assertFileContents("build/blog/item3/supplimental_content/index.html", "")
+        self.assertFileContents("build/blog/item3/supplimental_content/index.html", "supplimental")
         self.assertFileContents("build/blog/index.html",
                 "/blog/item1/ /blog/item2/ /blog/item3/ ")
 

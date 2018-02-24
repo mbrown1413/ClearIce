@@ -130,14 +130,13 @@ class TestApp(BaseTest):
         )
 
     def test_template_var_not_found(self):
-
-        # Undefined context fine if not put through filter...
         self.write_file("templates/default.html", "{{ blah }}")
         self.write_file("content/index.md", "---\n---")
-        self.generate()
-        self.assertFileContents("build/index.html", "")
+        self.assertGenerateRaises(
+            clearice.exceptions.TemplateError,
+            "'blah' is undefined",
+        )
 
-        # ...but errors when testing attributes
         self.write_file("templates/default.html", "{{ blah.foo }}")
         self.assertGenerateRaises(
             clearice.exceptions.TemplateError,
@@ -168,7 +167,7 @@ class TestApp(BaseTest):
         # Cannot parse date in filename results in no date context
         self.write_file("content/blog/_collection.yaml", "")
         self.write_file("templates/default.html",
-                "{{ date }}, {{ slug }}")
+                "{% if date is defined %}{{ date }}{% endif %}, {{ slug }}")
         self.write_file("content/blog/202A-01-02_post_name.md", "---\n---")
         self.generate()
         self.assertFileContents("build/blog/202A-01-02_post_name/index.html",
@@ -185,7 +184,7 @@ class TestApp(BaseTest):
 
         # Date in frontmatter as string is fine
         self.write_file("templates/default.html",
-                "{{ date }}, {{ slug }}")
+                "{% if date is defined %}{{ date }}{% endif %}, {{ slug }}")
         self.write_file("content/blog/post.md", '---\ndate: "2000-01-38"\n---')
         self.generate()
         self.assertFileContents("build/blog/post/index.html",
