@@ -238,6 +238,7 @@ class _Collections():
         for c in self:
             if c.name == name:
                 return c
+        raise AttributeError('Collection "{}" not found'.format(name))
 
     def __len__(self):
         return sum([1 for collection in self])

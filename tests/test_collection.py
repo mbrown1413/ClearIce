@@ -344,8 +344,10 @@ class TestCollection(BaseTest):
         """)
         self.write_file("templates/default.html", "{{ collections.notexist }}")
         self.write_file("content/index.md", "---\n---")
-        self.generate()
-        self.assertFileContents("build/index.html", "None")
+        self.assertGenerateRaises(
+            clearice.exceptions.TemplateError,
+            "has no attribute 'notexist'"
+        )
 
     def test_context(self):
         self.write_file("content/blog1/_collection.yaml", """
