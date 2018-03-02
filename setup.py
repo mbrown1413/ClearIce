@@ -36,6 +36,7 @@ setup(
     packages=["clearice"],
     license="LICENSE.txt",
     install_requires=[
+        "Jinja2",
         "pyyaml",
         "markdown",
         "click",
