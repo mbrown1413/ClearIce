@@ -5,7 +5,7 @@ import jinja2
 import yaml
 
 from .helpers import walk_dir, normalize_url, remove_suffix
-from .exceptions import ConfigError, UrlConflictError, YamlError
+from .exceptions import ConfigError, UrlConflictError, YamlError, TemplateVarUndefined, TemplateError
 from . import generators, buildactions
 
 class App():
@@ -75,9 +75,27 @@ class App():
             undefined=jinja2.StrictUndefined,
         )
 
-    def render_template(self, template_name_or_list, context):
-        t = self.jinja_env.get_or_select_template(template_name_or_list)
-        return t.render(context)
+    def render_template(self, template, context):
+
+        # Get template
+        try:
+            t = self.jinja_env.get_template(template)
+        except jinja2.exceptions.TemplateNotFound as e:
+            if template == "default.html":
+                t = self.jinja_env.from_string("{{ content | markdown }}")
+            else:
+                raise TemplateError.from_jinja(e, template) from None
+        except jinja2.exceptions.TemplateError as e:
+            raise TemplateError.from_jinja(e, template) from None
+
+        # Render template
+        try:
+            return t.render(context)
+        except jinja2.exceptions.UndefinedError as e:
+            e2 = e
+            raise TemplateVarUndefined(t, jinja_exception=e, context=context) from None
+        except jinja2.exceptions.TemplateError as e:
+            raise TemplateError.from_jinja(e, template) from None
 
     def get_build_path(self, path):
         absolute = os.path.abspath(os.path.join(self.build_dir, path))
@@ -92,10 +110,6 @@ class App():
             raise ValueError("Tried to get path {} outside of content directory "
                     "{}".format(absolute, self.content_dir))
         return absolute
-
-    def render_template_string(self, source, context):
-        t = self.jinja_env.from_string(source)
-        return t.render(context)
 
     def walk_content(self, include_consumed=False, **kwargs):
         files = walk_dir(
@@ -203,7 +217,7 @@ class App():
         elif isinstance(view, str):
             action = buildactions.Html(view)
         else:
-            raise RuntimeError("Could not resolve action from view.")
+            raise RuntimeError("Could not resolve action from view {}".format(view))
 
         out_path = self.get_build_path(url)
         file_written = action.do(self, out_path)

@@ -118,7 +118,7 @@ class TestApp(BaseTest):
         self.write_file("content/index.md", "---\ntemplate: nonexistant.html\n---")
         self.assertGenerateRaises(
             clearice.exceptions.TemplateNotFound,
-            '^Template not found: "nonexistant.html"$'
+            'Error while processing template nonexistant.html for url /:\nTemplate not found'
         )
 
     def test_template_parse_error(self):
@@ -134,13 +134,13 @@ class TestApp(BaseTest):
         self.write_file("content/index.md", "---\n---")
         self.assertGenerateRaises(
             clearice.exceptions.TemplateError,
-            "'blah' is undefined",
+            'Undefined variable "blah" in "{}/templates/default.html" on line 1'.format(self.tmp_dir)
         )
 
         self.write_file("templates/default.html", "{{ blah.foo }}")
         self.assertGenerateRaises(
             clearice.exceptions.TemplateError,
-            "'blah' is undefined"
+            'Undefined variable "blah" in "{}/templates/default.html" on line 1'.format(self.tmp_dir)
         )
 
     def test_filename_date_and_name(self):

@@ -134,21 +134,9 @@ class TemplateView(View):
         template = self.context["template"]
         try:
             return self.app.render_template(template, self.context)
-        except jinja2.exceptions.TemplateNotFound as e:
-            if template == "default.html":
-                return self.app.render_template_string("{{ content | markdown }}", self.context)
-            #TODO: Clarify where the user provided this template, so they can
-            #      go fix the problem! Maybe a more detailed description if
-            #      it's "default.html" that's missing.
-            raise TemplateNotFound(template) from None
-        except jinja2.exceptions.TemplateError as e:
-            #TODO: Include context? It's helpful on variable undefined error.
-            #TODO: Move some of this printing logic into exception class.
-            file_msg = "in "+e.filename if hasattr(e, "filename") else ""
-            line_msg = " on line "+str(e.lineno) if hasattr(e, "lineno") else ""
-            raise TemplateError('Error while processing template "{}" for url '
-                '"{}":\n  {}\n{}{}'.format(template, self.url,
-                e.message, file_msg, line_msg)) from None
+        except TemplateError as e:
+            e.url = self.url
+            raise
 
 class MarkdownView(TemplateView):
 
