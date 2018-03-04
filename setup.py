@@ -41,6 +41,7 @@ setup(
         "markdown",
         "click",
         "hfilesize",
+        "watchdog",
     ],
     entry_points={
         "console_scripts": [
