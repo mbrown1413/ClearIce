@@ -94,7 +94,10 @@ class Collection(GeneratorBase):
         for abspath, relpath in files:
             if self.file_is_item(app, abspath, relpath):
                 view = views.MarkdownView(abspath, app, collection=self)
-                url = self.file_to_url(app, view, abspath, relpath)
+                if view.context.get('url', None):
+                    url = normalize_url(view.context['url'])
+                else:
+                    url = self.file_to_url(app, view, abspath, relpath)
                 view.set_url(url)
 
                 self.items.append(view)
