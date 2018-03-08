@@ -31,9 +31,7 @@ class App():
         self.has_built = False
 
         # Markdown Template Filter
-        md_parser = Markdown()
-        md_convert = lambda text: jinja2.Markup(md_parser.reset().convert(text))
-        self.add_template_filter(md_convert, "markdown")
+        self.add_template_filter(self.markdown_filter, "markdown")
 
         if not self.skip_default_generators:
             self.add_default_generators()
@@ -68,11 +66,20 @@ class App():
             static_gen = generators.StaticFileGeneraor.from_conf(yaml_path, static_conf)
             self.add_generator(static_gen)
 
+    @jinja2.contextfilter
+    def markdown_filter(self, context, value):
+        md_parser = Markdown()
+        template = self.jinja_env.from_string(value)
+        md = template.render(context)
+        out = md_parser.convert(md)
+        return jinja2.Markup(out)
+
     def make_jinja_environment(self):
         return jinja2.Environment(
             loader=jinja2.FileSystemLoader(self.template_dir),
             autoescape=True,
             undefined=jinja2.StrictUndefined,
+            trim_blocks=True,
         )
 
     def render_template(self, template, context):

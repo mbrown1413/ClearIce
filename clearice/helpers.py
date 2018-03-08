@@ -128,6 +128,9 @@ def get_undefined_template_vars(template, context=()):
     # of functionality in jinja2.meta, except we track line numbers and recurse
     # to included/extended templates.
 
+    if not os.path.exists(template.filename):
+        return
+
     env = template.environment
     ast = env.parse(open(template.filename).read())
 
