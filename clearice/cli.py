@@ -2,22 +2,22 @@
 import sys
 import argparse
 import os
+from contextlib import contextmanager
 
 from click import progressbar
 
 from .app import App
 from .exceptions import ClearIceException
 
-def print_errors_decorator(func):
-    def f(*args, **kwargs):
-        try:
-            func(*args, **kwargs)
-        except ClearIceException as e:
-            sys.stderr.write(str(e)+'\n')
+@contextmanager
+def print_errors(exit_on_error=True):
+    try:
+        yield None
+    except ClearIceException as e:
+        sys.stderr.write(str(e)+'\n')
+        if exit_on_error:
             sys.exit(-1)
-    return f
 
-@print_errors_decorator
 def cmd_generate(args):
     quiet = False
 
@@ -64,7 +64,8 @@ def cmd_watch(args, serve=False):
         def generate(self):
             print()
             print("Rebuilding...")
-            cmd_generate(args)
+            with print_errors(exit_on_error=False):
+                cmd_generate(args)
 
     #TODO: Configurable dirs
     build_dir = os.path.join(args.root, "build")
@@ -135,7 +136,8 @@ def main():
     # Parse and call command
     args = parser.parse_args()
     func = args.func if 'func' in args else cmd_generate
-    func(args)
+    with print_errors():
+        func(args)
 
 if __name__ == "__main__":
     main()
