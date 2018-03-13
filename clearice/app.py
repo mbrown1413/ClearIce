@@ -80,6 +80,7 @@ class App():
             autoescape=True,
             undefined=jinja2.StrictUndefined,
             trim_blocks=True,
+            lstrip_blocks=True,
         )
 
     def render_template(self, template, context):
