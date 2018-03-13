@@ -105,7 +105,7 @@ class TemplateView(View):
         # Order is important here: some sources will overwrite others.
 
         context = {
-            "self": self,
+            "page": self,
             "url": self.url,
             "app": self.app,
             "collections": self.app.collections,
