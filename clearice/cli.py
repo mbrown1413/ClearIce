@@ -18,8 +18,7 @@ def print_errors(exit_on_error=True):
         if exit_on_error:
             sys.exit(-1)
 
-def cmd_generate(args):
-    quiet = False
+def cmd_generate(args, quiet=False):
 
     app = App(root_dir=args.root)
     app.print_progress = not quiet
@@ -49,7 +48,7 @@ def cmd_watch(args, serve=False):
         def __init__(self, build_dir):
             self.build_dir = build_dir
             self.last_gen_time = 0
-            self.build_timeout = 2
+            self.build_timeout = 0.5
 
         def on_any_event(self, event):
             if event.src_path.startswith(self.build_dir):
@@ -57,7 +56,7 @@ def cmd_watch(args, serve=False):
 
             t = time.time()
             if t - self.last_gen_time >= self.build_timeout:
-                time.sleep(0.5)
+                time.sleep(0.2)
                 self.last_gen_time = t
                 self.generate()
 
@@ -65,7 +64,8 @@ def cmd_watch(args, serve=False):
             print()
             print("Rebuilding...")
             with print_errors(exit_on_error=False):
-                cmd_generate(args)
+                cmd_generate(args, quiet=True)
+            print("Done")
 
     #TODO: Configurable dirs
     build_dir = os.path.join(args.root, "build")
