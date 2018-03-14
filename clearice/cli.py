@@ -9,6 +9,12 @@ from click import progressbar
 from .app import App
 from .exceptions import ClearIceException
 
+def get_app(args):
+    kwargs = {}
+    if args.build_dir:
+        kwargs['build_dir'] = args.build_dir
+    return App(root_dir=args.root, **kwargs)
+
 @contextmanager
 def print_errors(exit_on_error=True):
     try:
@@ -20,7 +26,7 @@ def print_errors(exit_on_error=True):
 
 def cmd_generate(args, quiet=False):
 
-    app = App(root_dir=args.root)
+    app = get_app(args)
     app.print_progress = not quiet
 
     if quiet:
@@ -67,10 +73,9 @@ def cmd_watch(args, serve=False):
                 cmd_generate(args, quiet=True)
             print("Done")
 
-    #TODO: Configurable dirs
-    build_dir = os.path.join(args.root, "build")
+    # Find out what build dir will be by instantiating app
+    build_dir = get_app(args).build_dir
 
-    print("Watching", args.root)
     handler = EventHandler(build_dir)
     handler.generate()
 
@@ -105,6 +110,9 @@ def main():
     parser.add_argument("--root", '-r', default=os.getcwd(),
         help='Root directory of the site, containing the content/ and '
         'templates/ directories. (default current directory)')
+    parser.add_argument("--build-dir", "-b", default=None,
+        help="Directory to output built site. If relative, it is relative to "
+        "the root directory.")
     subparsers = parser.add_subparsers()
 
     # Generate Command Parser

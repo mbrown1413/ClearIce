@@ -10,18 +10,21 @@ from . import generators, buildactions
 
 class App():
 
-    def __init__(self, root_dir=None, print_progress=False, skip_default_generators=False):
+    def __init__(self, root_dir=None, print_progress=False, **conf_overwrite):
         self.root_dir = os.path.abspath(root_dir) if root_dir else os.getcwd()
         self.print_progress = print_progress
-        self.skip_default_generators = skip_default_generators
-
-        self.content_dir = os.path.join(self.root_dir, "content")
-        self.build_dir = os.path.join(self.root_dir, "build")
-        self.template_dir = os.path.join(self.root_dir, "templates")
+        self.conf_overwrite = conf_overwrite
 
         self.reset()
 
     def reset(self):
+        self.conf_path = os.path.join(self.root_dir, 'conf.yaml')
+        self.conf = self.read_conf()
+
+        self.content_dir = os.path.join(self.root_dir, self.conf['content_dir'])
+        self.build_dir = os.path.join(self.root_dir, self.conf['build_dir'])
+        self.template_dir = os.path.join(self.root_dir, self.conf['template_dir'])
+
         self.jinja_env = self.make_jinja_environment()
         self.consumed_files = set()
         self._generators = []
@@ -33,8 +36,28 @@ class App():
         # Markdown Template Filter
         self.add_template_filter(self.markdown_filter, "markdown")
 
-        if not self.skip_default_generators:
+        if not self.conf['skip_default_generators']:
             self.add_default_generators()
+
+    def read_conf(self):
+        conf = {
+            'content_dir': 'content',
+            'build_dir': 'build',
+            'template_dir': 'templates',
+            'skip_default_generators': False,
+        }
+
+        if os.path.exists(self.conf_path):
+            with open(self.conf_path) as f:
+                try:
+                    conf.update(yaml.load(f))
+                except yaml.error.YAMLError as e:
+                    raise YamlError(self.conf_path, e) from None
+
+        conf.update(self.conf_overwrite)
+
+        #TODO: Error on extra conf fields
+        return conf
 
     def add_default_generators(self):
         COLLECTION_CONF = "_collection.yaml"
@@ -47,23 +70,10 @@ class App():
         # Markdown page generator
         self.add_generator(generators.MarkdownGenerator())
 
-        # For now this is the only function that reads config.yaml, but in the
-        # future this will have to be moved.
-        yaml_path = os.path.join(self.root_dir, 'conf.yaml')
-        if os.path.exists(yaml_path):
-            with open(yaml_path) as f:
-                try:
-                    conf = yaml.load(f)
-                except yaml.error.YAMLError as e:
-                    raise YamlError(yaml_path, e) from None
-        else:
-            conf = {}
-        #TODO: Error on extra conf fields
-
         # Static File Generator
-        static_conf = conf.pop("static", {}) or {}
+        static_conf = self.conf.pop("static", {}) or {}
         if static_conf:
-            static_gen = generators.StaticFileGeneraor.from_conf(yaml_path, static_conf)
+            static_gen = generators.StaticFileGeneraor.from_conf(self.conf_path, static_conf)
             self.add_generator(static_gen)
 
     @jinja2.contextfilter
