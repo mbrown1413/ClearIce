@@ -96,6 +96,11 @@ class TemplateView(View):
 
     def __getitem__(self, key):
         return self.context[key]
+    def __getattr__(self, key):
+        try:
+            return self.context[key]
+        except KeyError:
+            raise AttributeError
 
     def set_url(self, url):
         self.url = url
